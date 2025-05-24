@@ -1,0 +1,1526 @@
+package tui
+
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// 应用状态
+type State int
+
+const (
+	StateInit       State = iota // 初始化状态
+	StateTokenInput              // Token输入
+	StateMain                    // 主界面（文件浏览器）
+	StateSettings                // 上传设置
+	StateUploadList              // 上传管理器
+	StateError                   // 错误状态
+)
+
+// 用户信息
+type UserInfo struct {
+	Username    string `json:"username"`
+	Email       string `json:"email"`
+	UsedSpace   int64  `json:"used_space"`
+	TotalSpace  int64  `json:"total_space"`
+	IsSponsored bool   `json:"is_sponsored"`
+	UID         string `json:"uid"`
+}
+
+// 配置结构
+type Config struct {
+	Token          string `json:"token"`
+	UploadServer   string `json:"upload_server"`
+	ChunkSize      int    `json:"chunk_size"`
+	MaxConcurrent  int    `json:"max_concurrent"`
+	QuickUpload    bool   `json:"quick_upload"`
+	SkipUpload     bool   `json:"skip_upload"`
+	Timeout        int    `json:"timeout"`
+}
+
+// 默认配置
+func defaultConfig() Config {
+	return Config{
+		Token:         "",
+		UploadServer:  "https://tmplink-sec.vxtrans.com/api_v2",
+		ChunkSize:     3 * 1024 * 1024, // 3MB
+		MaxConcurrent: 5,
+		QuickUpload:   true,
+		SkipUpload:    false,
+		Timeout:       300, // 5分钟
+	}
+}
+
+// 任务状态
+type TaskStatus struct {
+	ID          string    `json:"id"`
+	Status      string    `json:"status"`
+	FilePath    string    `json:"file_path"`
+	FileName    string    `json:"file_name"`
+	FileSize    int64     `json:"file_size"`
+	Progress    float64   `json:"progress"`
+	DownloadURL string    `json:"download_url,omitempty"`
+	ErrorMsg    string    `json:"error_msg,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// 文件信息
+type FileInfo struct {
+	Name    string
+	Size    int64
+	IsDir   bool
+	ModTime time.Time
+}
+
+// Model TUI模型
+type Model struct {
+	// 基本状态
+	state        State
+	cliPath      string
+	config       Config
+	userInfo     UserInfo
+	selectedFile string
+	uploadTasks  []TaskStatus
+	
+	// UI组件
+	tokenInput    textinput.Model
+	filePicker    filepicker.Model
+	progress      progress.Model
+	spinner       spinner.Model
+	navigation    list.Model
+	uploadTable   table.Model
+	viewport      viewport.Model
+	
+	// 文件浏览器状态
+	currentDir    string
+	files         []FileInfo
+	selectedIndex int
+	
+	// 设置界面状态
+	settingsIndex int
+	settingsInputs map[string]textinput.Model
+	
+	// 界面状态
+	err           error
+	width         int
+	height        int
+	statusFiles   map[string]string // taskID -> statusFile path
+	isLoading     bool
+	uploadSpeed   float64 // KB/s
+	activeUploads int
+}
+
+// 导航菜单项
+type menuItem struct {
+	title string
+	desc  string
+}
+
+func (i menuItem) FilterValue() string { return i.title }
+func (i menuItem) Title() string       { return i.title }
+func (i menuItem) Description() string { return i.desc }
+
+// NewModel 创建新的TUI模型
+func NewModel(cliPath string) Model {
+	// 加载配置
+	config := loadConfig()
+	
+	// 初始化token输入框
+	tokenInput := textinput.New()
+	tokenInput.Placeholder = "请输入TmpLink API Token"
+	tokenInput.Width = 50
+	
+	// 初始化状态
+	initialState := StateInit
+	if config.Token == "" {
+		initialState = StateTokenInput
+		tokenInput.Focus()
+	}
+
+	// 初始化文件选择器
+	fp := filepicker.New()
+	fp.AllowedTypes = []string{} // 允许所有文件类型
+	fp.ShowHidden = false
+	fp.DirAllowed = true
+	// 设置为当前工作目录
+	if currentDir, err := os.Getwd(); err == nil {
+		fp.CurrentDirectory = currentDir
+	} else {
+		fp.CurrentDirectory, _ = os.UserHomeDir()
+	}
+
+	// 初始化进度条
+	prog := progress.New(progress.WithDefaultGradient())
+	
+	// 初始化加载动画
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	
+	// 初始化导航菜单
+	items := []list.Item{
+		menuItem{title: "文件浏览器", desc: "选择要上传的文件"},
+		menuItem{title: "上传设置", desc: "配置上传参数"},
+		menuItem{title: "上传管理器", desc: "查看和管理上传任务"},
+	}
+	
+	nav := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	nav.Title = "功能菜单"
+	nav.SetShowStatusBar(false)
+	nav.SetFilteringEnabled(false)
+	nav.SetShowHelp(false)
+	
+	// 初始化上传任务表格
+	columns := []table.Column{
+		{Title: "文件名", Width: 30},
+		{Title: "大小", Width: 10},
+		{Title: "进度", Width: 10},
+		{Title: "状态", Width: 10},
+		{Title: "速度", Width: 10},
+	}
+	
+	uploadTable := table.New(
+		table.WithColumns(columns),
+		table.WithRows([]table.Row{}),
+		table.WithFocused(true),
+		table.WithHeight(7),
+	)
+	
+	// 初始化viewport
+	vp := viewport.New(78, 20)
+	
+	// 获取当前目录
+	currentDir, err := os.Getwd()
+	if err != nil {
+		currentDir, _ = os.UserHomeDir()
+	}
+	
+	// 初始化设置输入框
+	settingsInputs := make(map[string]textinput.Model)
+	
+	chunkSizeInput := textinput.New()
+	chunkSizeInput.Placeholder = "分块大小(MB)"
+	chunkSizeInput.Width = 20
+	chunkSizeInput.SetValue(fmt.Sprintf("%d", config.ChunkSize/(1024*1024)))
+	chunkSizeInput.Focus() // 默认聚焦第一个输入框
+	settingsInputs["chunk_size"] = chunkSizeInput
+	
+	concurrencyInput := textinput.New()
+	concurrencyInput.Placeholder = "并发数"
+	concurrencyInput.Width = 20
+	concurrencyInput.SetValue(fmt.Sprintf("%d", config.MaxConcurrent))
+	settingsInputs["concurrency"] = concurrencyInput
+	
+	timeoutInput := textinput.New()
+	timeoutInput.Placeholder = "超时时间(秒)"
+	timeoutInput.Width = 20
+	timeoutInput.SetValue(fmt.Sprintf("%d", config.Timeout))
+	settingsInputs["timeout"] = timeoutInput
+
+	return Model{
+		state:         initialState,
+		cliPath:       cliPath,
+		config:        config,
+		tokenInput:    tokenInput,
+		filePicker:    fp,
+		progress:      prog,
+		spinner:       s,
+		navigation:    nav,
+		uploadTable:   uploadTable,
+		viewport:      vp,
+		currentDir:     currentDir,
+		files:          []FileInfo{},
+		selectedIndex:  0,
+		settingsIndex:  0,
+		settingsInputs: settingsInputs,
+		uploadTasks:    make([]TaskStatus, 0),
+		statusFiles:    make(map[string]string),
+		isLoading:      config.Token != "",
+	}
+}
+
+// Init 初始化命令
+func (m Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
+	
+	cmds = append(cmds, textinput.Blink)
+	cmds = append(cmds, m.filePicker.Init())
+	cmds = append(cmds, m.spinner.Tick)
+	
+	// 如果有token，开始获取用户信息
+	if m.config.Token != "" {
+		cmds = append(cmds, m.fetchUserInfo())
+	}
+	
+	// 加载文件列表
+	cmds = append(cmds, m.loadFiles())
+	
+	return tea.Batch(cmds...)
+}
+
+// Update 更新模型
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.updateComponentSizes()
+
+	case UserInfoMsg:
+		m.userInfo = msg.UserInfo
+		m.isLoading = false
+		if m.state == StateInit {
+			m.state = StateMain
+		}
+		return m, nil
+		
+	case UserInfoErrorMsg:
+		m.err = fmt.Errorf("获取用户信息失败: %s", msg.Error)
+		m.isLoading = false
+		m.state = StateError
+		return m, nil
+		
+	case FilesLoadedMsg:
+		m.files = msg.Files
+		return m, nil
+
+	case spinner.TickMsg:
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case tea.KeyMsg:
+		return m.handleKeyPress(msg)
+
+	case UploadProgressMsg:
+		return m.handleUploadProgress(msg)
+
+	case UploadCompleteMsg:
+		return m.handleUploadComplete(msg)
+
+	case UploadErrorMsg:
+		return m.handleUploadError(msg)
+	}
+
+	// 更新各组件
+	return m.updateComponents(msg)
+}
+
+// updateComponentSizes 更新组件尺寸
+func (m *Model) updateComponentSizes() {
+	m.progress.Width = m.width - 4
+	m.navigation.SetWidth(m.width)
+	m.navigation.SetHeight(m.height - 7) // 为三行状态栏留空间
+	m.uploadTable.SetWidth(m.width)
+	m.viewport.Width = m.width
+	m.viewport.Height = m.height - 7
+}
+
+// handleKeyPress 处理键盘输入
+func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	}
+
+	switch m.state {
+	case StateTokenInput:
+		return m.handleTokenInput(msg)
+	case StateMain:
+		return m.handleMainView(msg)
+	case StateSettings:
+		return m.handleSettings(msg)
+	case StateUploadList:
+		return m.handleUploadList(msg)
+	case StateError:
+		return m.handleError(msg)
+	}
+
+	return m, nil
+}
+
+// handleTokenInput 处理token输入
+func (m Model) handleTokenInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		if m.tokenInput.Value() != "" {
+			m.config.Token = m.tokenInput.Value()
+			if err := saveConfig(m.config); err != nil {
+				m.err = fmt.Errorf("保存配置失败: %w", err)
+				m.state = StateError
+				return m, nil
+			}
+			m.state = StateInit
+			m.isLoading = true
+			return m, m.fetchUserInfo()
+		}
+	}
+
+	var cmd tea.Cmd
+	m.tokenInput, cmd = m.tokenInput.Update(msg)
+	return m, cmd
+}
+
+// handleMainView 处理主界面输入
+func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "tab":
+		m.state = StateSettings
+		return m, nil
+	case "enter":
+		return m.handleFileSelection()
+	case "up", "k":
+		if m.selectedIndex > 0 {
+			m.selectedIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.selectedIndex < len(m.files)-1 {
+			m.selectedIndex++
+		}
+		return m, nil
+	case "left", "h":
+		// 返回上级目录
+		return m.navigateToParent()
+	case "right", "l":
+		// 进入目录或选择文件
+		return m.handleFileSelection()
+	}
+
+	return m, nil
+}
+
+// handleSettings 处理设置界面输入
+func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	settingsKeys := []string{"chunk_size", "concurrency", "timeout"}
+	
+	switch msg.String() {
+	case "tab":
+		m.state = StateUploadList
+		m.updateUploadTable()
+		return m, nil
+	case "esc":
+		m.state = StateMain
+		return m, nil
+	case "up", "k":
+		if m.settingsIndex > 0 {
+			// 失去当前输入框焦点
+			currentKey := settingsKeys[m.settingsIndex]
+			input := m.settingsInputs[currentKey]
+			input.Blur()
+			m.settingsInputs[currentKey] = input
+			
+			m.settingsIndex--
+			
+			// 设置新输入框焦点
+			newKey := settingsKeys[m.settingsIndex]
+			newInput := m.settingsInputs[newKey]
+			newInput.Focus()
+			m.settingsInputs[newKey] = newInput
+		}
+		return m, nil
+	case "down", "j":
+		if m.settingsIndex < len(settingsKeys)-1 {
+			// 失去当前输入框焦点
+			currentKey := settingsKeys[m.settingsIndex]
+			input := m.settingsInputs[currentKey]
+			input.Blur()
+			m.settingsInputs[currentKey] = input
+			
+			m.settingsIndex++
+			
+			// 设置新输入框焦点
+			newKey := settingsKeys[m.settingsIndex]
+			newInput := m.settingsInputs[newKey]
+			newInput.Focus()
+			m.settingsInputs[newKey] = newInput
+		}
+		return m, nil
+	case "enter":
+		return m.saveSettings()
+	}
+	
+	// 更新当前聚焦的输入框
+	if m.settingsIndex < len(settingsKeys) {
+		currentKey := settingsKeys[m.settingsIndex]
+		input := m.settingsInputs[currentKey]
+		newInput, cmd := input.Update(msg)
+		m.settingsInputs[currentKey] = newInput
+		return m, cmd
+	}
+	
+	return m, nil
+}
+
+// handleUploadList 处理上传列表输入
+func (m Model) handleUploadList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "tab":
+		m.state = StateMain
+		return m, nil
+	case "esc":
+		m.state = StateMain
+		return m, nil
+	case "delete":
+		// 取消选中的上传任务
+		return m.cancelSelectedUpload()
+	}
+
+	var cmd tea.Cmd
+	m.uploadTable, cmd = m.uploadTable.Update(msg)
+	return m, cmd
+}
+
+// handleError 处理错误界面输入
+func (m Model) handleError(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.err = nil
+		m.state = StateMain
+		return m, nil
+	case "esc":
+		m.err = nil
+		m.state = StateMain
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleFileSelection 处理文件选择
+func (m Model) handleFileSelection() (tea.Model, tea.Cmd) {
+	if len(m.files) == 0 || m.selectedIndex >= len(m.files) {
+		return m, nil
+	}
+	
+	selectedFile := m.files[m.selectedIndex]
+	
+	if selectedFile.IsDir {
+		if selectedFile.Name == ".." {
+			// 返回上级目录
+			return m.navigateToParent()
+		} else {
+			// 进入目录
+			newDir := filepath.Join(m.currentDir, selectedFile.Name)
+			m.currentDir = newDir
+			m.selectedIndex = 0
+			return m, m.loadFiles()
+		}
+	} else {
+		// 选择文件进行上传
+		filePath := filepath.Join(m.currentDir, selectedFile.Name)
+		return m.startFileUpload(filePath)
+	}
+}
+
+// navigateToParent 返回上级目录
+func (m Model) navigateToParent() (tea.Model, tea.Cmd) {
+	parentDir := filepath.Dir(m.currentDir)
+	if parentDir != m.currentDir { // 确保不是根目录
+		m.currentDir = parentDir
+		m.selectedIndex = 0
+		return m, m.loadFiles()
+	}
+	return m, nil
+}
+
+// cancelSelectedUpload 取消选中的上传任务
+func (m Model) cancelSelectedUpload() (tea.Model, tea.Cmd) {
+	// 实现取消上传逻辑
+	return m, nil
+}
+
+// handleUploadProgress 处理上传进度
+func (m Model) handleUploadProgress(msg UploadProgressMsg) (tea.Model, tea.Cmd) {
+	for i, task := range m.uploadTasks {
+		if task.ID == msg.TaskID {
+			m.uploadTasks[i].Progress = msg.Progress
+			if msg.Progress > 0 {
+				m.uploadTasks[i].Status = "uploading"
+			}
+			m.uploadTasks[i].UpdatedAt = time.Now()
+			break
+		}
+	}
+	m.updateUploadTable()
+	// 继续监控直到完成
+	return m, m.checkProgress(msg.TaskID)
+}
+
+// handleUploadComplete 处理上传完成
+func (m Model) handleUploadComplete(msg UploadCompleteMsg) (tea.Model, tea.Cmd) {
+	for i, task := range m.uploadTasks {
+		if task.ID == msg.TaskID {
+			m.uploadTasks[i].Status = "completed"
+			m.uploadTasks[i].Progress = 100.0  // CLI使用0-100的百分比
+			m.uploadTasks[i].DownloadURL = msg.DownloadURL
+			m.uploadTasks[i].UpdatedAt = time.Now()
+			m.activeUploads--
+			break
+		}
+	}
+	m.updateUploadTable()
+	return m, nil
+}
+
+// handleUploadError 处理上传错误
+func (m Model) handleUploadError(msg UploadErrorMsg) (tea.Model, tea.Cmd) {
+	// 如果有TaskID，更新对应任务状态
+	if msg.TaskID != "" {
+		for i, task := range m.uploadTasks {
+			if task.ID == msg.TaskID {
+				m.uploadTasks[i].Status = "failed"
+				m.uploadTasks[i].ErrorMsg = msg.Error
+				m.uploadTasks[i].UpdatedAt = time.Now()
+				break
+			}
+		}
+		m.updateUploadTable()
+	} else {
+		m.err = fmt.Errorf("上传失败: %s", msg.Error)
+	}
+	m.activeUploads--
+	return m, nil
+}
+
+// updateComponents 更新组件
+func (m Model) updateComponents(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+
+	// 更新文件选择器
+	if m.state == StateMain {
+		m.filePicker, cmd = m.filePicker.Update(msg)
+		cmds = append(cmds, cmd)
+
+		// 检查文件选择
+		if didSelect, path := m.filePicker.DidSelectFile(msg); didSelect {
+			return m.startFileUpload(path)
+		}
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// startFileUpload 开始文件上传
+func (m Model) startFileUpload(filePath string) (tea.Model, tea.Cmd) {
+	m.selectedFile = filePath
+	m.activeUploads++
+
+	// 生成任务ID
+	taskID := fmt.Sprintf("task_%d", time.Now().Unix())
+	homeDir, _ := os.UserHomeDir()
+	statusDir := filepath.Join(homeDir, ".tmplink", "tasks")
+	os.MkdirAll(statusDir, 0755)
+	statusFile := filepath.Join(statusDir, taskID+".json")
+	m.statusFiles[taskID] = statusFile
+
+	// 立即创建任务状态并添加到任务列表
+	fileInfo, _ := os.Stat(filePath)
+	task := TaskStatus{
+		ID:        taskID,
+		Status:    "starting",
+		FilePath:  filePath,
+		FileName:  filepath.Base(filePath),
+		FileSize:  fileInfo.Size(),
+		Progress:  0.0,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	
+	// 添加到任务列表
+	m.uploadTasks = append(m.uploadTasks, task)
+	
+	// 更新上传表格
+	m.updateUploadTable()
+
+	return m, m.startUpload(filePath, taskID, statusFile)
+}
+
+// updateUploadTable 更新上传任务表格
+func (m *Model) updateUploadTable() {
+	var rows []table.Row
+	
+	for _, task := range m.uploadTasks {
+		// 格式化文件大小
+		sizeStr := ""
+		if task.FileSize < 1024 {
+			sizeStr = fmt.Sprintf("%dB", task.FileSize)
+		} else if task.FileSize < 1024*1024 {
+			sizeStr = fmt.Sprintf("%.1fKB", float64(task.FileSize)/1024)
+		} else if task.FileSize < 1024*1024*1024 {
+			sizeStr = fmt.Sprintf("%.1fMB", float64(task.FileSize)/(1024*1024))
+		} else {
+			sizeStr = fmt.Sprintf("%.1fGB", float64(task.FileSize)/(1024*1024*1024))
+		}
+		
+		// 格式化进度 (CLI返回的是0-100的百分比，直接使用)
+		progressStr := fmt.Sprintf("%.1f%%", task.Progress)
+		
+		// 状态翻译
+		statusStr := task.Status
+		switch task.Status {
+		case "starting":
+			statusStr = "启动中"
+		case "pending":
+			statusStr = "等待中"
+		case "uploading":
+			statusStr = "上传中"
+		case "completed":
+			statusStr = "已完成"
+		case "failed":
+			statusStr = "失败"
+		}
+		
+		// 速度显示（暂时为空，可以后续添加）
+		speedStr := ""
+		if task.Status == "uploading" && m.uploadSpeed > 0 {
+			speedStr = fmt.Sprintf("%.1fKB/s", m.uploadSpeed)
+		}
+		
+		row := table.Row{
+			task.FileName,
+			sizeStr,
+			progressStr,
+			statusStr,
+			speedStr,
+		}
+		rows = append(rows, row)
+	}
+	
+	m.uploadTable.SetRows(rows)
+}
+
+// View 渲染视图
+func (m Model) View() string {
+	if m.state == StateTokenInput {
+		return m.renderTokenInput()
+	}
+	
+	// 双区域布局：顶部状态栏 + 功能区域
+	statusBar := m.renderStatusBar()
+	content := m.renderContent()
+	
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		statusBar,
+		content,
+	)
+}
+
+// renderTokenInput 渲染token输入界面
+func (m Model) renderTokenInput() string {
+	var s strings.Builder
+	
+	s.WriteString(titleStyle.Render("TmpLink 文件上传工具"))
+	s.WriteString("\n\n")
+	s.WriteString("请输入您的TmpLink API Token:\n\n")
+	s.WriteString(m.tokenInput.View())
+	s.WriteString("\n\n")
+	s.WriteString(helpStyle.Render("• Enter: 继续 • Ctrl+C: 退出"))
+	
+	return s.String()
+}
+
+// renderStatusBar 渲染顶部状态栏（三行布局）
+func (m Model) renderStatusBar() string {
+	if m.isLoading {
+		return statusBarStyle.Render(fmt.Sprintf("%s 正在加载用户信息...", m.spinner.View()))
+	}
+	
+	// 计算可用宽度
+	statusWidth := m.width
+	if statusWidth <= 0 {
+		statusWidth = 80
+	}
+	
+	var lines []string
+	
+	// 第一行：用户信息和认证状态
+	var line1 string
+	if m.userInfo.Username != "" {
+		userText := fmt.Sprintf("用户: %s", m.userInfo.Username)
+		if m.userInfo.IsSponsored {
+			userText += " ✨ (赞助者)"
+		} else {
+			userText += " (普通用户)"
+		}
+		line1 = userText
+	} else {
+		line1 = "用户: 未登录"
+	}
+	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line1))
+	
+	// 第二行：存储信息
+	var line2 string
+	if m.userInfo.TotalSpace > 0 {
+		usedGB := float64(m.userInfo.UsedSpace) / (1024 * 1024 * 1024)
+		totalGB := float64(m.userInfo.TotalSpace) / (1024 * 1024 * 1024)
+		
+		// 计算使用百分比
+		usagePercent := float64(m.userInfo.UsedSpace) / float64(m.userInfo.TotalSpace) * 100
+		
+		// 构建存储信息行
+		storageText := fmt.Sprintf("存储: %.1fGB/%.1fGB (%.1f%%)", usedGB, totalGB, usagePercent)
+		
+		// 添加上传状态（如果有）
+		if m.activeUploads > 0 {
+			uploadText := fmt.Sprintf(" | 上传中: %d个文件", m.activeUploads)
+			if m.uploadSpeed > 0 {
+				uploadText += fmt.Sprintf(" (%.1fKB/s)", m.uploadSpeed)
+			}
+			storageText += uploadText
+		}
+		
+		line2 = storageText
+	} else {
+		if m.activeUploads > 0 {
+			line2 = fmt.Sprintf("上传中: %d个文件", m.activeUploads)
+			if m.uploadSpeed > 0 {
+				line2 += fmt.Sprintf(" (%.1fKB/s)", m.uploadSpeed)
+			}
+		} else {
+			line2 = "存储信息: 加载中..."
+		}
+	}
+	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line2))
+	
+	// 第三行：操作提示
+	var line3 string
+	switch m.state {
+	case StateMain:
+		line3 = "操作: ↑↓/jk:选择 ←/h:上级目录 →/l/Enter:进入 Tab:设置 Q:退出"
+	case StateSettings:
+		line3 = "操作: ↑↓/jk:选择设置 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
+	case StateUploadList:
+		line3 = "操作: ↑↓/jk:选择任务 Del:取消 Tab:文件浏览 Esc:返回 Q:退出"
+	case StateError:
+		line3 = "操作: Enter:重试 Esc:返回 Q:退出"
+	default:
+		line3 = "操作: Q:退出"
+	}
+	
+	// 确保操作提示不超过宽度
+	if len(line3) > statusWidth {
+		line3 = line3[:statusWidth-3] + "..."
+	}
+	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line3))
+	
+	return strings.Join(lines, "\n")
+}
+
+// renderContent 渲染主要内容区域
+func (m Model) renderContent() string {
+	switch m.state {
+	case StateInit:
+		return m.renderLoading()
+	case StateMain:
+		return m.renderMainView()
+	case StateSettings:
+		return m.renderSettings()
+	case StateUploadList:
+		return m.renderUploadList()
+	case StateError:
+		return m.renderError()
+	default:
+		return "未知状态"
+	}
+}
+
+// renderLoading 渲染加载界面
+func (m Model) renderLoading() string {
+	return fmt.Sprintf("\n%s 正在初始化...", m.spinner.View())
+}
+
+// renderMainView 渲染主界面（文件浏览器）
+func (m Model) renderMainView() string {
+	var s strings.Builder
+	
+	// 标题和当前路径
+	s.WriteString(titleStyle.Render("文件浏览器"))
+	s.WriteString("\n")
+	s.WriteString(fmt.Sprintf("当前目录: %s\n\n", m.currentDir))
+	
+	// 文件列表
+	if len(m.files) == 0 {
+		s.WriteString("目录为空或正在加载...")
+	} else {
+		// 显示文件列表
+		maxHeight := m.height - 10 // 为三行状态栏和标题留空间
+		if maxHeight < 5 {
+			maxHeight = 5
+		}
+		
+		startIndex := 0
+		if m.selectedIndex >= maxHeight {
+			startIndex = m.selectedIndex - maxHeight + 1
+		}
+		
+		endIndex := startIndex + maxHeight
+		if endIndex > len(m.files) {
+			endIndex = len(m.files)
+		}
+		
+		for i := startIndex; i < endIndex; i++ {
+			file := m.files[i]
+			prefix := "  "
+			
+			if i == m.selectedIndex {
+				prefix = "> "
+			}
+			
+			// 文件/目录图标
+			icon := "📄"
+			if file.IsDir {
+				icon = "📁"
+			}
+			
+			// 格式化大小
+			sizeStr := ""
+			if !file.IsDir {
+				if file.Size < 1024 {
+					sizeStr = fmt.Sprintf("%dB", file.Size)
+				} else if file.Size < 1024*1024 {
+					sizeStr = fmt.Sprintf("%.1fKB", float64(file.Size)/1024)
+				} else if file.Size < 1024*1024*1024 {
+					sizeStr = fmt.Sprintf("%.1fMB", float64(file.Size)/(1024*1024))
+				} else {
+					sizeStr = fmt.Sprintf("%.1fGB", float64(file.Size)/(1024*1024*1024))
+				}
+			}
+			
+			line := fmt.Sprintf("%s%s %s", prefix, icon, file.Name)
+			if sizeStr != "" {
+				line += fmt.Sprintf(" (%s)", sizeStr)
+			}
+			
+			if i == m.selectedIndex {
+				line = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line)
+			}
+			
+			s.WriteString(line)
+			s.WriteString("\n")
+		}
+		
+		// 显示滚动指示器
+		if len(m.files) > maxHeight {
+			s.WriteString(fmt.Sprintf("\n[显示 %d-%d / 共 %d 项]", startIndex+1, endIndex, len(m.files)))
+		}
+	}
+	
+	return s.String()
+}
+
+// renderSettings 渲染设置界面
+func (m Model) renderSettings() string {
+	var s strings.Builder
+	
+	s.WriteString(titleStyle.Render("上传设置"))
+	s.WriteString("\n\n")
+	
+	// 赞助者状态提示
+	if m.userInfo.IsSponsored {
+		s.WriteString("✨ 赞助者专享设置\n\n")
+	} else {
+		s.WriteString("⚠️  部分设置需要赞助者权限\n\n")
+	}
+	
+	settingsKeys := []string{"chunk_size", "concurrency", "timeout"}
+	settingsLabels := []string{"分块大小 (MB):", "并发数:", "超时时间 (秒):"}
+	settingsSponsored := []bool{true, true, false} // 哪些设置需要赞助者权限
+	
+	for i, key := range settingsKeys {
+		prefix := "  "
+		if i == m.settingsIndex {
+			prefix = "> "
+		}
+		
+		label := settingsLabels[i]
+		input := m.settingsInputs[key]
+		
+		// 检查权限
+		isLocked := settingsSponsored[i] && !m.userInfo.IsSponsored
+		if isLocked {
+			label += " 🔒"
+		}
+		
+		line := fmt.Sprintf("%s%s\n%s  %s", prefix, label, strings.Repeat(" ", len(prefix)), input.View())
+		
+		if isLocked {
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(line)
+		} else if i == m.settingsIndex {
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line)
+		}
+		
+		s.WriteString(line)
+		s.WriteString("\n\n")
+	}
+	
+	// 只读信息
+	s.WriteString("只读信息:\n")
+	s.WriteString(fmt.Sprintf("  服务器: %s\n", m.config.UploadServer))
+	s.WriteString(fmt.Sprintf("  快速上传: %t\n", m.config.QuickUpload))
+	
+	// 操作提示已移至顶部状态栏
+	
+	return s.String()
+}
+
+// renderUploadList 渲染上传管理器
+func (m Model) renderUploadList() string {
+	var s strings.Builder
+	
+	s.WriteString(titleStyle.Render("上传管理器"))
+	s.WriteString("\n\n")
+	
+	if len(m.uploadTasks) == 0 {
+		s.WriteString("暂无上传任务")
+	} else {
+		s.WriteString(m.uploadTable.View())
+	}
+	
+	return s.String()
+}
+
+// renderError 渲染错误界面
+func (m Model) renderError() string {
+	var s strings.Builder
+	
+	s.WriteString(titleStyle.Render("错误"))
+	s.WriteString("\n\n")
+	if m.err != nil {
+		s.WriteString(errorStyle.Render(m.err.Error()))
+	}
+	s.WriteString("\n\n")
+	s.WriteString(helpStyle.Render("• Enter: 重试 • Esc: 返回"))
+	
+	return s.String()
+}
+
+// startUpload 开始上传文件
+func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
+	return func() tea.Msg {
+		// CLI现在是自包含的，不需要预先获取上传信息
+		// 启动CLI进程，只传递CLI支持的参数
+		cmd := exec.Command(m.cliPath,
+			"-file", filePath,
+			"-token", m.config.Token,
+			"-task-id", taskID,
+			"-status-file", statusFile,
+			"-api-server", "https://tmplink-sec.vxtrans.com/api_v2",
+			"-chunk-size", fmt.Sprintf("%d", m.config.ChunkSize),
+			"-timeout", fmt.Sprintf("%d", m.config.Timeout),
+			"-max-retries", "3",
+			"-model", "1",
+			"-mr-id", "",
+		)
+		
+		// 设置输出到文件，便于调试
+		logFile := statusFile + ".log"
+		if file, err := os.Create(logFile); err == nil {
+			cmd.Stdout = file
+			cmd.Stderr = file
+		}
+		
+		// 启动进程但不等待完成
+		err := cmd.Start()
+		if err != nil {
+			return UploadErrorMsg{Error: fmt.Sprintf("启动CLI失败: %v", err), TaskID: taskID}
+		}
+		
+		// 后台等待进程完成
+		go func() {
+			cmd.Wait() // 等待进程完成
+		}()
+		
+		// 开始监控进度
+		return UploadProgressMsg{TaskID: taskID, Progress: 0.0}
+	}
+}
+
+// UploadInfo 上传信息
+type UploadInfo struct {
+	Server string
+	UToken string
+}
+
+// getUploadInfo 获取上传服务器和token信息
+func (m Model) getUploadInfo(filePath string) (*UploadInfo, error) {
+	// 获取文件信息
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("获取文件信息失败: %w", err)
+	}
+	
+	// 计算文件SHA1
+	sha1Hash, err := calculateFileSHA1(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("计算SHA1失败: %w", err)
+	}
+	
+	client := &http.Client{Timeout: 10 * time.Second}
+	
+	// 调用upload_request_select2获取上传服务器
+	formData := fmt.Sprintf("action=upload_request_select2&sha1=%s&filename=%s&filesize=%d&model=1&token=%s",
+		sha1Hash, filepath.Base(filePath), fileInfo.Size(), m.config.Token)
+
+	req, err := http.NewRequest("POST", "https://tmplink-sec.vxtrans.com/api_v2/file", strings.NewReader(formData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var selectResp struct {
+		Status int `json:"status"`
+		Data   struct {
+			UToken  string      `json:"utoken"`
+			Servers interface{} `json:"servers"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &selectResp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if selectResp.Status != 1 {
+		return nil, fmt.Errorf("获取上传服务器失败，状态码: %d", selectResp.Status)
+	}
+
+	// 解析servers字段
+	var uploadServer string
+	if selectResp.Data.Servers != nil {
+		if serverList, ok := selectResp.Data.Servers.([]interface{}); ok && len(serverList) > 0 {
+			// servers是对象数组，每个对象有url字段
+			if serverObj, ok := serverList[0].(map[string]interface{}); ok {
+				if serverURL, ok := serverObj["url"].(string); ok {
+					uploadServer = serverURL
+				}
+			}
+		}
+	}
+	
+	if uploadServer == "" {
+		return nil, fmt.Errorf("无法获取上传服务器地址")
+	}
+
+	return &UploadInfo{
+		Server: uploadServer,
+		UToken: selectResp.Data.UToken,
+	}, nil
+}
+
+// calculateFileSHA1 计算文件SHA1
+func calculateFileSHA1(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hasher := sha1.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// checkProgress 检查上传进度
+func (m Model) checkProgress(taskID string) tea.Cmd {
+	return func() tea.Msg {
+		statusFile, exists := m.statusFiles[taskID]
+		if !exists {
+			return UploadErrorMsg{Error: "找不到状态文件", TaskID: taskID}
+		}
+		
+		// 读取状态文件
+		data, err := os.ReadFile(statusFile)
+		if err != nil {
+			// 文件可能还没创建，等待1秒后再次检查
+			time.Sleep(time.Second)
+			return UploadProgressMsg{TaskID: taskID, Progress: 0.0}
+		}
+		
+		var task TaskStatus
+		if err := json.Unmarshal(data, &task); err != nil {
+			time.Sleep(time.Second)
+			return UploadProgressMsg{TaskID: taskID, Progress: 0.0}
+		}
+		
+		switch task.Status {
+		case "completed":
+			return UploadCompleteMsg{TaskID: taskID, DownloadURL: task.DownloadURL}
+		case "failed":
+			return UploadErrorMsg{Error: task.ErrorMsg, TaskID: taskID}
+		default:
+			// 延迟1秒后继续监控
+			time.Sleep(time.Second)
+			return UploadProgressMsg{TaskID: taskID, Progress: task.Progress}
+		}
+	}
+}
+
+// 消息类型
+type UploadProgressMsg struct {
+	TaskID   string
+	Progress float64
+}
+
+type UploadCompleteMsg struct {
+	TaskID      string
+	DownloadURL string
+}
+
+type UploadErrorMsg struct {
+	Error  string
+	TaskID string
+}
+
+// 样式
+// getConfigPath 获取配置文件路径
+func getConfigPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp"
+	}
+	return filepath.Join(homeDir, ".tmplink_config.json")
+}
+
+// loadConfig 加载配置
+func loadConfig() Config {
+	configPath := getConfigPath()
+	
+	// 如果配置文件不存在，返回默认配置
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return defaultConfig()
+	}
+	
+	// 读取配置文件
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return defaultConfig()
+	}
+	
+	// 解析配置
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return defaultConfig()
+	}
+	
+	// 填充缺失的默认值
+	if config.Timeout == 0 {
+		config.Timeout = 300
+	}
+	if config.UploadServer == "" {
+		config.UploadServer = "https://tmplink-sec.vxtrans.com/api_v2"
+	}
+	
+	return config
+}
+
+// saveConfig 保存配置
+func saveConfig(config Config) error {
+	configPath := getConfigPath()
+	
+	// 确保目录存在
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return err
+	}
+	
+	// 序列化配置
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	
+	// 写入文件
+	return os.WriteFile(configPath, data, 0644)
+}
+
+// fetchUserInfo 获取用户信息
+func (m Model) fetchUserInfo() tea.Cmd {
+	return func() tea.Msg {
+		// 调用实际API获取用户信息
+		userInfo, err := callUserAPI(m.config.Token)
+		if err != nil {
+			return UserInfoErrorMsg{Error: err.Error()}
+		}
+		
+		return UserInfoMsg{UserInfo: userInfo}
+	}
+}
+
+// callUserAPI 调用用户信息API
+func callUserAPI(token string) (UserInfo, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	
+	// 第一步：获取基本用户信息和存储信息
+	detailData := fmt.Sprintf("action=get_detail&token=%s", token)
+	detailReq, err := http.NewRequest("POST", "https://tmplink-sec.vxtrans.com/api_v2/user", strings.NewReader(detailData))
+	if err != nil {
+		return UserInfo{}, err
+	}
+	
+	detailReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	
+	detailResp, err := client.Do(detailReq)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	defer detailResp.Body.Close()
+	
+	if detailResp.StatusCode != 200 {
+		return UserInfo{}, fmt.Errorf("HTTP错误: %d", detailResp.StatusCode)
+	}
+	
+	detailBody, err := io.ReadAll(detailResp.Body)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	
+	// 解析详细信息响应
+	var detailApiResp struct {
+		Status int `json:"status"`
+		Data   struct {
+			UID          int64 `json:"uid"`
+			Storage      int64 `json:"storage"`
+			StorageUsed  int64 `json:"storage_used"`
+			Sponsor      bool  `json:"sponsor"`
+		} `json:"data"`
+		Msg string `json:"msg"`
+	}
+	
+	if err := json.Unmarshal(detailBody, &detailApiResp); err != nil {
+		return UserInfo{}, fmt.Errorf("解析详细信息失败: %w", err)
+	}
+	
+	if detailApiResp.Status != 1 {
+		return UserInfo{}, fmt.Errorf("获取详细信息失败: %s", detailApiResp.Msg)
+	}
+	
+	// 第二步：获取用户名信息
+	userInfoData := fmt.Sprintf("action=pf_userinfo_get&token=%s", token)
+	userInfoReq, err := http.NewRequest("POST", "https://tmplink-sec.vxtrans.com/api_v2/user", strings.NewReader(userInfoData))
+	if err != nil {
+		return UserInfo{}, err
+	}
+	
+	userInfoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	
+	userInfoResp, err := client.Do(userInfoReq)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	defer userInfoResp.Body.Close()
+	
+	if userInfoResp.StatusCode != 200 {
+		return UserInfo{}, fmt.Errorf("HTTP错误: %d", userInfoResp.StatusCode)
+	}
+	
+	userInfoBody, err := io.ReadAll(userInfoResp.Body)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	
+	// 解析用户信息响应
+	var userInfoApiResp struct {
+		Status int `json:"status"`
+		Data   struct {
+			Nickname string `json:"nickname"`
+		} `json:"data"`
+		Msg string `json:"msg"`
+	}
+	
+	if err := json.Unmarshal(userInfoBody, &userInfoApiResp); err != nil {
+		return UserInfo{}, fmt.Errorf("解析用户信息失败: %w", err)
+	}
+	
+	// 如果获取用户名失败，使用默认值
+	username := "用户"
+	if userInfoApiResp.Status == 1 && userInfoApiResp.Data.Nickname != "" {
+		username = userInfoApiResp.Data.Nickname
+	}
+	
+	return UserInfo{
+		Username:    username,
+		Email:       "", // API似乎不返回邮箱
+		UID:         fmt.Sprintf("%d", detailApiResp.Data.UID),
+		IsSponsored: detailApiResp.Data.Sponsor,
+		UsedSpace:   detailApiResp.Data.StorageUsed,
+		TotalSpace:  detailApiResp.Data.Storage,
+	}, nil
+}
+
+// 消息类型
+type UserInfoMsg struct {
+	UserInfo UserInfo
+}
+
+type UserInfoErrorMsg struct {
+	Error string
+}
+
+type FilesLoadedMsg struct {
+	Files []FileInfo
+}
+
+// loadFiles 加载当前目录的文件列表
+func (m Model) loadFiles() tea.Cmd {
+	return func() tea.Msg {
+		files, err := loadDirectoryFiles(m.currentDir)
+		if err != nil {
+			return UserInfoErrorMsg{Error: fmt.Sprintf("加载目录失败: %v", err)}
+		}
+		return FilesLoadedMsg{Files: files}
+	}
+}
+
+// loadDirectoryFiles 读取目录中的文件
+func loadDirectoryFiles(dirPath string) ([]FileInfo, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+	
+	var files []FileInfo
+	
+	// 添加返回上级目录选项（除非已在根目录）
+	if dirPath != "/" && dirPath != filepath.VolumeName(dirPath) {
+		files = append(files, FileInfo{
+			Name:  "..",
+			IsDir: true,
+		})
+	}
+	
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue // 跳过无法读取的文件
+		}
+		
+		files = append(files, FileInfo{
+			Name:    entry.Name(),
+			Size:    info.Size(),
+			IsDir:   entry.IsDir(),
+			ModTime: info.ModTime(),
+		})
+	}
+	
+	return files, nil
+}
+
+// saveSettings 保存设置
+func (m Model) saveSettings() (tea.Model, tea.Cmd) {
+	settingsKeys := []string{"chunk_size", "concurrency", "timeout"}
+	settingsSponsored := []bool{true, true, false}
+	
+	// 解析和验证输入值
+	for i, key := range settingsKeys {
+		input := m.settingsInputs[key]
+		value := input.Value()
+		
+		// 检查权限
+		if settingsSponsored[i] && !m.userInfo.IsSponsored {
+			continue // 跳过无权限的设置
+		}
+		
+		// 解析数值
+		var intValue int
+		if _, err := fmt.Sscanf(value, "%d", &intValue); err != nil {
+			m.err = fmt.Errorf("设置 %s 的值无效: %s", key, value)
+			m.state = StateError
+			return m, nil
+		}
+		
+		// 验证范围并应用设置
+		switch key {
+		case "chunk_size":
+			if intValue < 1 || intValue > 80 {
+				m.err = fmt.Errorf("分块大小必须在 1-80 MB 之间")
+				m.state = StateError
+				return m, nil
+			}
+			m.config.ChunkSize = intValue * 1024 * 1024
+		case "concurrency":
+			if intValue < 1 || intValue > 20 {
+				m.err = fmt.Errorf("并发数必须在 1-20 之间")
+				m.state = StateError
+				return m, nil
+			}
+			m.config.MaxConcurrent = intValue
+		case "timeout":
+			if intValue < 30 || intValue > 3600 {
+				m.err = fmt.Errorf("超时时间必须在 30-3600 秒之间")
+				m.state = StateError
+				return m, nil
+			}
+			m.config.Timeout = intValue
+		}
+	}
+	
+	// 保存配置到文件
+	if err := saveConfig(m.config); err != nil {
+		m.err = fmt.Errorf("保存配置失败: %w", err)
+		m.state = StateError
+		return m, nil
+	}
+	
+	// 返回主界面
+	m.state = StateMain
+	return m, nil
+}
+
+// 样式
+var (
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")).
+			Bold(true).
+			Padding(1, 0)
+
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
+
+	successStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("40"))
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196"))
+			
+	statusBarStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("62")).
+			Foreground(lipgloss.Color("230")).
+			Padding(0, 1).
+			Width(0) // 动态设置宽度
+)

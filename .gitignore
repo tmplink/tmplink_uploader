@@ -1,0 +1,31 @@
+# 编译产物
+tmplink
+tmplink-cli
+tmplink-uploader
+dist/
+
+# 测试文件
+test-tmplink-*
+coverage.out
+coverage.html
+
+# 临时文件
+*.tmp
+*.log
+.DS_Store
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Go模块缓存
+go.sum.backup
+
+# 配置和状态文件
+.tmplink/
+*.json
+
+# 测试数据
+test_*.txt
