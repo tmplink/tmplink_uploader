@@ -34,10 +34,12 @@ This is a dual-process uploader tool for [钛盘](https://tmp.link/), written in
 
 **Upload Features:**
 1. **Chunked Upload**: Configurable chunk size (default 3MB, max 80MB)
-2. **Progress Tracking**: Real-time progress via status file updates
+2. **Progress Tracking**: Real-time progress with upload speed calculation via status file updates
 3. **Resumable Uploads**: SHA1-based deduplication and instant uploads
 4. **Multi-threading**: Concurrent chunk uploads within each CLI process
-5. **Error Handling**: Automatic retry with configurable retry count
+5. **Error Handling**: Automatic retry with configurable retry count and improved error messages
+6. **Upload Speed Display**: Real-time speed monitoring with weighted averaging algorithm
+7. **Server Selection**: Dynamic server list from API with manual selection for sponsored users
 
 ### API Integration
 
@@ -48,6 +50,7 @@ The codebase integrates with 钛盘's REST API endpoints:
 - File operations: `/file` endpoint for upload preparation  
 - Upload servers: Dynamic server selection for optimal upload performance
 - Slice upload: `/app/upload_slice` for chunked uploads
+- Server enumeration: Real-time server list retrieval via `upload_request_select2`
 
 #### Key API Endpoints
 
@@ -64,6 +67,14 @@ The codebase integrates with 钛盘's REST API endpoints:
 - Action: `prepare`
 - Purpose: Query which slices need uploading and handle upload state machine
 - Status codes: 1=complete, 2=wait, 3=upload_slice, 7=error, 9=reset
+
+**Dynamic Server Selection**
+- Server list obtained from `upload_request_select2` API response
+- Available servers include: Global, JP (Japan), CN (China), HD1/HD2 (High Definition), C2 (Netherlands)
+- Each server has `title` (display name) and `url` (upload endpoint)
+- GUI automatically refreshes server list after user authentication
+- Sponsored users can manually override automatic server selection
+- CLI supports forced server selection via `-upload-server` parameter
 
 ### Authentication Flow
 
@@ -84,6 +95,30 @@ The application includes comprehensive token validation:
 - Automatic re-prompting if token expires or becomes invalid
 - User information (email, UID, sponsor status) is retrieved during validation
 - Detailed error reporting including debug information from API
+- Enhanced error handling with two-phase JSON parsing for better error messages
+
+### User Permission System
+
+The application implements a tiered permission system based on user sponsor status:
+
+**Regular Users:**
+- File upload and download functionality
+- Basic settings: timeout configuration only
+- Default automatic server selection
+- Standard upload speed monitoring
+
+**Sponsored Users (Premium Features):**
+- All regular user features
+- Advanced upload settings: chunk size and concurrency control
+- Manual server selection from dynamic API-provided server list
+- Quick upload toggle (enable/disable instant upload checks)
+- Priority server access and selection
+
+**Permission Enforcement:**
+- Settings interface shows locked (🔒) options for non-sponsored users
+- Locked settings display current values as read-only
+- Dynamic UI adaptation based on user sponsor status
+- Graceful fallback for unsupported operations
 
 ### TUI Architecture
 
@@ -106,6 +141,18 @@ The terminal user interface is built with bubbletea following the Elm architectu
 - State-driven rendering with dedicated render functions
 - Component focus management and keyboard handling
 - Responsive sizing that adapts to terminal dimensions
+- Permission-based UI rendering (sponsor vs regular users)
+- Dynamic server list management with real-time API updates
+- Upload speed calculation with weighted averaging
+- Keyboard navigation optimized for arrow keys only
+
+**Enhanced UI Features:**
+- Real-time upload speed display (MB/s) for both active and completed uploads
+- Server selection interface for sponsored users with left/right navigation
+- Quick upload toggle with space bar interaction
+- Hidden file visibility toggle with 't' key
+- Status bar optimization to ensure key commands remain visible
+- Permission-aware settings interface with locked/unlocked indicators
 
 ### CLI Parameters
 
@@ -118,7 +165,8 @@ The tmplink-cli process accepts the following command-line parameters:
 - `-status-file`: Path to JSON status file for progress communication
 
 **Optional Configuration Parameters:**
-- `-server`: Upload server URL (default: https://tmplink-sec.vxtrans.com/api_v2)
+- `-api-server`: API server URL (default: https://tmplink-sec.vxtrans.com/api_v2)
+- `-upload-server`: Force specific upload server URL (optional, overrides API server selection)
 - `-chunk-size`: Chunk size in bytes (default: 3MB, max: 80MB)
 - `-max-retries`: Maximum retry attempts (default: 3)
 - `-timeout`: Request timeout in seconds (default: 300)
@@ -130,6 +178,7 @@ The tmplink-cli process accepts the following command-line parameters:
 - `-mr-id`: Resource ID (default: "0" for root directory, for specific upload contexts)
 - `-skip-upload`: Skip upload flag (default: 1, enables instant upload check)
 - `-uid`: User ID (optional, auto-obtained from token validation if not provided)
+- `-debug`: Enable debug mode for detailed logging
 
 **API Upload Parameters:**
 
@@ -258,6 +307,21 @@ The Go client handles dynamic API responses:
 
 ### Known Test Results
 - **10MB file with 1MB chunks**: Successfully uploads with status 8 completion
+- **500MB large file testing**: Successfully completed with retry logic fixes
 - **mr_id parameter testing**: Confirmed "0" default prevents folder lookup errors
 - **Status code validation**: Status 7(data=8) correctly identified as error, status 8 as success
 - **API endpoint compatibility**: All endpoints tested with proper form POST requests
+- **Upload speed calculation**: Verified weighted averaging algorithm accuracy
+- **Server selection testing**: Dynamic server list retrieval from API confirmed
+- **Permission system testing**: Sponsor vs regular user feature access validated
+- **Token validation**: Enhanced error handling for expired/invalid tokens
+- **Navigation improvements**: Arrow-key-only navigation and hidden file toggle verified
+
+### Recent Bug Fixes and Improvements
+- **Critical retry logic fix**: Resolved loop counter vs retry counter confusion causing 50% upload failures
+- **Token validation enhancement**: Two-phase JSON parsing for better error messages when tokens expire
+- **Upload speed implementation**: Added SpeedCalculator with weighted averaging for accurate speed monitoring
+- **Server address handling**: Fixed GUI server selection to properly pass upload server addresses to CLI
+- **Dynamic server lists**: Replaced hardcoded server lists with real-time API retrieval
+- **Permission system**: Implemented sponsor-only features with graceful degradation for regular users
+- **UI navigation**: Streamlined keyboard shortcuts and improved status bar visibility

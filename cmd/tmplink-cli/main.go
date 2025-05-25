@@ -118,18 +118,19 @@ func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
 func main() {
 	// 定义命令行参数
 	var (
-		filePath    = flag.String("file", "", "要上传的文件路径 (必需)")
-		token       = flag.String("token", "", "TmpLink API token (必需)")
-		apiServer   = flag.String("api-server", "https://tmplink-sec.vxtrans.com/api_v2", "API服务器地址")
-		chunkSize   = flag.Int("chunk-size", 3*1024*1024, "分块大小(字节)")
-		maxRetries  = flag.Int("max-retries", 3, "最大重试次数")
-		timeout     = flag.Int("timeout", 300, "超时时间(秒)")
-		statusFile  = flag.String("status-file", "", "任务状态文件路径 (必需)")
-		taskID      = flag.String("task-id", "", "任务ID (必需)")
-		model       = flag.Int("model", 0, "文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)")
-		mrID        = flag.String("mr-id", "0", "资源ID (默认0=根目录)")
-		skipUpload  = flag.Int("skip-upload", 1, "跳过上传标志 (1=检查秒传)")
-		debugMode   = flag.Bool("debug", false, "调试模式，输出详细运行信息")
+		filePath     = flag.String("file", "", "要上传的文件路径 (必需)")
+		token        = flag.String("token", "", "TmpLink API token (必需)")
+		apiServer    = flag.String("api-server", "https://tmplink-sec.vxtrans.com/api_v2", "API服务器地址")
+		uploadServer = flag.String("upload-server", "", "强制指定上传服务器地址 (可选，留空自动选择)")
+		chunkSize    = flag.Int("chunk-size", 3*1024*1024, "分块大小(字节)")
+		maxRetries   = flag.Int("max-retries", 3, "最大重试次数")
+		timeout      = flag.Int("timeout", 300, "超时时间(秒)")
+		statusFile   = flag.String("status-file", "", "任务状态文件路径 (必需)")
+		taskID       = flag.String("task-id", "", "任务ID (必需)")
+		model        = flag.Int("model", 0, "文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)")
+		mrID         = flag.String("mr-id", "0", "资源ID (默认0=根目录)")
+		skipUpload   = flag.Int("skip-upload", 1, "跳过上传标志 (1=检查秒传)")
+		debugMode    = flag.Bool("debug", false, "调试模式，输出详细运行信息")
 	)
 
 	flag.Parse()
@@ -173,16 +174,17 @@ func main() {
 
 	// 创建上传配置
 	config := &Config{
-		Token:      *token,
-		Server:     *apiServer,
-		ChunkSize:  *chunkSize,
-		MaxRetries: *maxRetries,
-		Timeout:    time.Duration(*timeout) * time.Second,
-		Model:      *model,
-		MrID:       *mrID,
-		SkipUpload: *skipUpload,
-		UID:        "", // 将在内部获取
-		Debug:      *debugMode,
+		Token:        *token,
+		Server:       *apiServer,
+		UploadServer: *uploadServer, // 用户指定的上传服务器
+		ChunkSize:    *chunkSize,
+		MaxRetries:   *maxRetries,
+		Timeout:      time.Duration(*timeout) * time.Second,
+		Model:        *model,
+		MrID:         *mrID,
+		SkipUpload:   *skipUpload,
+		UID:          "", // 将在内部获取
+		Debug:        *debugMode,
 	}
 	
 	debugPrint(config, "启动CLI上传程序")
@@ -460,7 +462,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			// 上传完成
 			debugPrint(config, "状态1: 上传完成")
 			if ukey, ok := prepareResp.Data.(string); ok {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 			return "", fmt.Errorf("无法获取ukey")
 			
@@ -468,7 +470,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			// 文件已被其他人上传，直接跳过
 			debugPrint(config, "状态6: 文件已存在，直接返回")
 			if ukey, ok := prepareResp.Data.(string); ok {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 			return "", fmt.Errorf("无法获取ukey")
 			
@@ -476,11 +478,11 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			// 分片合并完成 - 按照JavaScript逻辑直接成功
 			debugPrint(config, "状态8: 分片合并完成，上传成功")
 			if ukey, ok := prepareResp.Data.(string); ok {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 			// 如果data是数字，也当作ukey处理
 			if ukeyNum, ok := prepareResp.Data.(float64); ok {
-				return fmt.Sprintf("https://tmp.link/%d", int64(ukeyNum)), nil
+				return fmt.Sprintf("https://tmp.link/f/%d", int64(ukeyNum)), nil
 			}
 			return "", fmt.Errorf("无法获取ukey")
 			
@@ -488,7 +490,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			// 文件合并进程正在进行中，按照JavaScript逻辑直接成功
 			debugPrint(config, "状态9: 合并进行中，按JS逻辑直接成功")
 			if ukey, ok := prepareResp.Data.(string); ok {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 			// 如果没有ukey，等待一下再查询
 			debugPrint(config, "状态9: 没有ukey，等待2秒...")
@@ -542,32 +544,44 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			// 按照JavaScript逻辑：rsp.data是错误代码，直接传递给upload_final
 			debugPrint(config, "状态7: 上传失败，错误代码: %v", prepareResp.Data)
 			
-			// 检查是否是特殊情况：data为8或9（按照JavaScript逻辑直接成功）
+			// 检查是否是特殊情况：data为0、8或9（按照JavaScript逻辑直接成功）
 			if dataFloat, ok := prepareResp.Data.(float64); ok {
-				if dataFloat == 8 {
+				if dataFloat == 0 {
+					debugPrint(config, "状态7但data=0: 上传成功，按JavaScript逻辑直接成功")
+					// 根据debug信息构造下载链接
+					if debugMap, ok := prepareResp.Debug.(map[string]interface{}); ok {
+						if fileinfo, ok := debugMap["fileinfo"].(map[string]interface{}); ok {
+							if sha1, ok := fileinfo["sha1"].(string); ok {
+								return fmt.Sprintf("https://tmp.link/f/%s", sha1), nil
+							}
+						}
+					}
+					// 如果无法从debug获取，返回基于SHA1的链接
+					return fmt.Sprintf("https://tmp.link/f/upload_success"), nil
+				} else if dataFloat == 8 {
 					debugPrint(config, "状态7但data=8: 合并完成，按JavaScript逻辑直接成功")
 					// 根据debug信息构造下载链接
 					if debugMap, ok := prepareResp.Debug.(map[string]interface{}); ok {
 						if fileinfo, ok := debugMap["fileinfo"].(map[string]interface{}); ok {
 							if sha1, ok := fileinfo["sha1"].(string); ok {
-								return fmt.Sprintf("https://tmp.link/%s", sha1), nil
+								return fmt.Sprintf("https://tmp.link/f/%s", sha1), nil
 							}
 						}
 					}
 					// 如果无法从debug获取，返回基于SHA1的链接
-					return fmt.Sprintf("https://tmp.link/upload_success"), nil
+					return fmt.Sprintf("https://tmp.link/f/upload_success"), nil
 				} else if dataFloat == 9 {
 					debugPrint(config, "状态7但data=9: 合并进行中，按JavaScript逻辑直接成功")
 					// 根据debug信息构造下载链接
 					if debugMap, ok := prepareResp.Debug.(map[string]interface{}); ok {
 						if fileinfo, ok := debugMap["fileinfo"].(map[string]interface{}); ok {
 							if sha1, ok := fileinfo["sha1"].(string); ok {
-								return fmt.Sprintf("https://tmp.link/%s", sha1), nil
+								return fmt.Sprintf("https://tmp.link/f/%s", sha1), nil
 							}
 						}
 					}
 					// 如果无法从debug获取，返回基于SHA1的链接
-					return fmt.Sprintf("https://tmp.link/upload_success"), nil
+					return fmt.Sprintf("https://tmp.link/f/upload_success"), nil
 				}
 			}
 			
@@ -774,8 +788,14 @@ func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName st
 		return nil, fmt.Errorf("无法获取上传服务器地址")
 	}
 
-	// 设置上传服务器到配置中
-	config.UploadServer = uploadServer
+	// 检查是否用户强制指定了上传服务器
+	if config.UploadServer != "" {
+		debugPrint(config, "使用用户指定的上传服务器: %s", config.UploadServer)
+		uploadServer = config.UploadServer
+	} else {
+		// 设置从API获取的上传服务器到配置中
+		config.UploadServer = uploadServer
+	}
 
 	return &UploadInfo{
 		UToken: selectResp.Data.UToken,
@@ -837,7 +857,7 @@ func checkQuickUpload(ctx context.Context, config *Config, sha1Hash, fileName st
 		// 秒传成功
 		if dataMap, ok := prepareResp.Data.(map[string]interface{}); ok {
 			if ukey, exists := dataMap["ukey"].(string); exists {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), false, nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), false, nil
 			}
 		}
 		return "", false, fmt.Errorf("秒传响应格式错误")
@@ -888,6 +908,26 @@ func getUserUID(ctx context.Context, config *Config) (string, error) {
 
 	debugPrint(config, "响应内容: %s", string(body))
 
+	// 首先解析基本响应以检查状态
+	var baseResp struct {
+		Status int         `json:"status"`
+		Data   interface{} `json:"data"`
+		Debug  interface{} `json:"debug"`
+	}
+
+	if err := json.Unmarshal(body, &baseResp); err != nil {
+		debugPrint(config, "JSON解析失败: %v", err)
+		return "", fmt.Errorf("解析用户响应失败: %w", err)
+	}
+
+	debugPrint(config, "解析结果 - 状态码: %d, 数据: %v", baseResp.Status, baseResp.Data)
+
+	if baseResp.Status != 1 {
+		debugPrint(config, "token验证失败，状态码: %d, debug: %v", baseResp.Status, baseResp.Debug)
+		return "", fmt.Errorf("token验证失败，状态码: %d (可能token已过期或无效)", baseResp.Status)
+	}
+
+	// 如果状态为1，再解析具体的用户数据
 	var userResp struct {
 		Status int `json:"status"`
 		Data   struct {
@@ -896,15 +936,8 @@ func getUserUID(ctx context.Context, config *Config) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &userResp); err != nil {
-		debugPrint(config, "JSON解析失败: %v", err)
-		return "", fmt.Errorf("解析用户响应失败: %w", err)
-	}
-
-	debugPrint(config, "解析结果 - 状态码: %d, UID: %d", userResp.Status, userResp.Data.UID)
-
-	if userResp.Status != 1 {
-		debugPrint(config, "token验证失败，状态码: %d", userResp.Status)
-		return "", fmt.Errorf("token验证失败，状态码: %d", userResp.Status)
+		debugPrint(config, "解析用户数据失败: %v", err)
+		return "", fmt.Errorf("解析用户数据失败: %w", err)
 	}
 
 	if userResp.Data.UID == 0 {
@@ -1042,13 +1075,17 @@ func prepareUpload(ctx context.Context, config *Config, filePath, sha1Hash strin
 		}
 	}
 	
-	if uploadServer == "" {
-		// 如果没有找到有效的上传服务器，使用默认服务器
-		uploadServer = strings.TrimSuffix(config.Server, "/api_v2")
+	// 检查是否用户强制指定了上传服务器
+	if config.UploadServer != "" {
+		uploadServer = config.UploadServer
+		fmt.Fprintf(os.Stderr, "使用用户指定的上传服务器: %s\n", uploadServer)
+	} else {
+		if uploadServer == "" {
+			// 如果没有找到有效的上传服务器，使用默认服务器
+			uploadServer = strings.TrimSuffix(config.Server, "/api_v2")
+		}
+		fmt.Fprintf(os.Stderr, "使用API分配的上传服务器: %s\n", uploadServer)
 	}
-
-	// 调试信息
-	fmt.Fprintf(os.Stderr, "使用上传服务器: %s\n", uploadServer)
 
 	// 生成uptoken (按照JS逻辑: SHA1(uid + filename + filesize + slice_size))
 	upTokenData := fmt.Sprintf("%s%s%d%d", config.UID, filepath.Base(filePath), fileSize, config.ChunkSize)
@@ -1108,7 +1145,7 @@ func prepareUpload(ctx context.Context, config *Config, filePath, sha1Hash strin
 		// 秒传成功
 		if dataMap, ok := prepareResp.Data.(map[string]interface{}); ok {
 			if ukey, exists := dataMap["ukey"].(string); exists {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), false, nil, nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), false, nil, nil
 			}
 		}
 		return "", false, nil, fmt.Errorf("秒传响应格式错误")
@@ -1351,12 +1388,12 @@ func getFinalResult(ctx context.Context, client *http.Client, config *Config, sh
 		// 上传完成，从data中获取ukey
 		if dataMap, ok := finalResp.Data.(map[string]interface{}); ok {
 			if ukey, exists := dataMap["ukey"].(string); exists {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 		}
 		// 如果data是字符串（某些情况下）
 		if ukey, ok := finalResp.Data.(string); ok && ukey != "" {
-			return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+			return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 		}
 		return "", fmt.Errorf("无法从响应中获取下载链接")
 	default:
@@ -1407,7 +1444,7 @@ func getDownloadURL(ctx context.Context, client *http.Client, config *Config, sh
 	if completeResp.Status == 1 {
 		if dataMap, ok := completeResp.Data.(map[string]interface{}); ok {
 			if ukey, exists := dataMap["ukey"].(string); exists {
-				return fmt.Sprintf("https://tmp.link/%s", ukey), nil
+				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 		}
 	}
