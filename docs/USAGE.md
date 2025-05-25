@@ -8,7 +8,7 @@
 
 #### 从源码构建
 ```bash
-git clone https://github.com/your-username/tmplink_uploader.git
+git clone https://github.com/tmplink/tmplink_uploader.git
 cd tmplink_uploader
 make build     # 构建当前平台版本
 # 或
@@ -16,15 +16,17 @@ make release   # 构建所有平台发布版本
 ```
 
 #### 使用预构建版本
-从 [Releases](https://github.com/your-username/tmplink_uploader/releases) 页面下载对应平台的预构建版本。
+从 [Releases](https://github.com/tmplink/tmplink_uploader/build) 页面下载对应平台的预构建版本。
 
 ### 基本使用
 
 #### 1. 获取 API Token
 1. 访问 [钛盘](https://tmp.link/) 并登录
-2. 打开浏览器开发者工具 (F12)
-3. 在控制台执行: `localStorage.getItem('token')`
-4. 复制返回的 token 值
+2. 点击上传文件按钮
+3. 点击重新设定按钮
+4. 找到使用 CLI 上传工具上传，并在对应的界面中复制 Token
+
+非常重要: Token 与您的账号相互关联，绝对不能泄露给他人。同时，如果在网页端退出了登录，Token 关联的用户信息也会分离。
 
 #### 2. 启动 GUI 程序
 ```bash
