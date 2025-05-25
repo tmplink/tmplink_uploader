@@ -299,6 +299,25 @@ The Go client handles dynamic API responses:
 
 ## Testing and Validation
 
+### Testing Rules and Guidelines
+
+**File Organization:**
+- **ALL test files and temporary files MUST be placed in the `test/` directory**
+- Test input files: `test/small_test.txt`, `test/medium_test.bin`, `test/large_test.bin`
+- Status files: `test/upload_status_*.json` 
+- Test logs: `test/test_*.log`
+- Temporary data: `test/temp_*`
+
+**Test File Naming Convention:**
+- Test input files: `test/<size>_test.<ext>` (e.g., `test/small_test.txt`)
+- Status files: `test/status_<test-id>.json` (e.g., `test/status_001.json`)
+- Log files: `test/test_<feature>_<date>.log` (e.g., `test/test_upload_20241231.log`)
+
+**CLI Testing Parameters:**
+- Use `-status-file test/status_<test-id>.json` for all CLI tests
+- Use unique task IDs: `test-<sequential-number>` (e.g., `test-001`, `test-002`)
+- Clean up test status files after validation
+
 ### Test Environment
 - Test files organized in `test/` directory
 - Sample configuration files for development

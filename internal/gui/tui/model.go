@@ -1300,10 +1300,7 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 	return func() tea.Msg {
 		// CLI现在是自包含的，不需要预先获取上传信息
 		// 启动CLI进程，只传递CLI支持的参数
-		apiServer := "https://tmplink-sec.vxtrans.com/api_v2"
-		if m.config.UploadServer != "" {
-			apiServer = m.config.UploadServer
-		}
+		apiServer := "https://tmplink-sec.vxtrans.com/api_v2"  // API服务器地址固定
 		
 		skipUpload := "1"
 		if !m.config.QuickUpload {
@@ -1321,12 +1318,12 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 			"-timeout", fmt.Sprintf("%d", m.config.Timeout),
 			"-max-retries", "3",
 			"-model", "1",
-			"-mr-id", "",
+			"-mr-id", "0",
 			"-skip-upload", skipUpload,
 		}
 		
 		// 如果用户选择了特定的上传服务器，添加upload-server参数
-		if m.config.SelectedServerName != "默认 (自动选择)" && m.config.UploadServer != "https://tmplink-sec.vxtrans.com/api_v2" {
+		if m.config.SelectedServerName != "默认 (自动选择)" && m.config.UploadServer != "" && m.config.UploadServer != "https://tmplink-sec.vxtrans.com/api_v2" {
 			args = append(args, "-upload-server", m.config.UploadServer)
 		}
 		
