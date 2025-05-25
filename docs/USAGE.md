@@ -1,221 +1,380 @@
-# TmpLink Uploader 使用说明
+# TmpLink Uploader 使用指南
 
-## 概述
+本文档提供详细的使用说明，包括安装、配置和操作指引。
 
-TmpLink Uploader 是一个双进程架构的文件上传工具，支持钛盘 (TmpLink) 平台的文件上传服务。包含图形用户界面 (TUI) 和命令行接口 (CLI) 两个组件。
+## 快速开始
 
-## 程序组件
+### 安装
 
-### tmplink - 图形用户界面 (TUI)
+#### 从源码构建
+```bash
+git clone https://github.com/your-username/tmplink_uploader.git
+cd tmplink_uploader
+make build
+```
 
-基于 Bubble Tea 框架的终端用户界面，提供交互式文件管理和上传功能。
+#### 使用预构建版本
+从 [Releases](https://github.com/your-username/tmplink_uploader/releases) 页面下载对应平台的预构建版本。
 
-#### 启动程序
+### 基本使用
 
+#### 1. 获取 API Token
+1. 访问 [TmpLink](https://tmp.link/) 并登录
+2. 打开浏览器开发者工具 (F12)
+3. 在控制台执行: `localStorage.getItem('token')`
+4. 复制返回的 token 值
+
+#### 2. 启动 GUI 程序
 ```bash
 ./tmplink
 ```
 
-#### 功能特性
+#### 3. 直接使用 CLI 程序
+```bash
+./tmplink-cli -file /path/to/file.txt -token YOUR_TOKEN -task-id unique-id -status-file status.json
+```
 
-- **文件选择**: 浏览目录并选择要上传的文件
-- **批量上传**: 支持多文件同时上传
-- **实时进度**: 显示每个文件的上传进度
-- **任务管理**: 查看上传任务状态和历史
-- **配置管理**: 设置上传参数和 API token
-- **错误处理**: 自动重试和错误提示
+## GUI 程序详细说明
 
-#### 界面操作
+### 界面导航
 
-**主菜单**:
+#### 主菜单
 - `↑/↓` - 导航菜单项
-- `Enter` - 选择菜单项
+- `Enter` - 选择菜单项  
 - `q` - 退出程序
 
-**文件选择**:
+#### 文件选择界面
 - `↑/↓` - 浏览文件列表
 - `Enter` - 选择文件进行上传
-- `Esc` - 返回上级菜单
 - `→` - 进入子目录
 - `←` - 返回父目录
-
-**上传列表**:
-- `↑/↓` - 浏览上传任务
-- `r` - 刷新任务状态
 - `Esc` - 返回主菜单
 
-**设置页面**:
+#### 上传列表界面  
+- `↑/↓` - 浏览上传任务
+- `r` - 刷新任务状态
+- `d` - 复制下载链接
+- `Esc` - 返回主菜单
+
+#### 设置界面
 - `↑/↓` - 选择设置项
 - `Enter` - 编辑设置值
 - `Tab` - 切换输入框
 - `Esc` - 保存并返回
 
-#### 配置参数
+### 配置参数
 
-设置页面可配置以下参数：
+#### Token 设置
+- **必需**: TmpLink API 访问令牌
+- **获取方式**: 从浏览器 localStorage 获取
+- **注意**: Token 会加密保存到配置文件
 
-- **Token**: TmpLink API 访问令牌
-- **分片大小**: 文件上传的块大小 (1MB-80MB)
-- **并发数**: 同时上传的文件数量
-- **超时时间**: 网络请求超时时间 (秒)
+#### 上传参数
+- **分片大小**: 1MB-80MB，推荐 3MB
+- **并发数**: 同时上传的文件数，推荐 3-5
+- **超时时间**: 网络请求超时，默认 300 秒
+- **文件有效期**: 0=24小时, 1=3天, 2=7天, 99=永久
 
-### tmplink-cli - 命令行接口
+#### 高级选项
+- **调试模式**: 输出详细日志信息
+- **跳过上传**: 启用秒传检查，默认开启
+- **资源目录**: 指定上传目录，默认根目录
 
-独立的命令行上传工具，用于单文件上传操作。
+## CLI 程序详细说明
 
-#### 基本用法
-
-```bash
-./tmplink-cli -file <文件路径> -token <API令牌> -task-id <任务ID> -status-file <状态文件>
-```
+### 命令行参数
 
 #### 必需参数
-
-- `-file`: 要上传的文件路径
-- `-token`: TmpLink API 访问令牌
-- `-task-id`: 唯一任务标识符
-- `-status-file`: JSON 状态文件路径，用于进程间通信
+```bash
+-file /path/to/file        # 文件路径
+-token YOUR_API_TOKEN      # API 令牌
+-task-id unique-task-id    # 任务ID
+-status-file status.json   # 状态文件路径
+```
 
 #### 可选参数
-
-- `-server`: 上传服务器 URL (默认: https://tmplink-upload-acc.vxtrans.com/app/upload_slice)
-- `-chunk-size`: 分片大小，字节 (默认: 3MB, 最大: 80MB)
-- `-max-retries`: 最大重试次数 (默认: 3)
-- `-timeout`: 请求超时时间，秒 (默认: 300)
-- `-model`: 文件有效期 (默认: 0=24小时, 1=3天, 2=7天, 99=永久)
-- `-mr-id`: 资源ID (默认: "0"=根目录)
-- `-skip-upload`: 跳过上传标志 (默认: 1, 启用秒传检查)
-- `-debug`: 调试模式，输出详细运行信息
-
-**重要更新 (v1.0.1)**:
-- **修复关键bug**: mr_id参数默认值从空字符串改为"0"
-- **状态码更新**: 状态7(data=8)表示"文件夹未找到"错误，状态8表示"合并完成"
-- 正确处理API响应状态码，避免将错误误认为成功
-
-**注意**: 
-- API 接口地址为: https://tmplink-sec.vxtrans.com/api_v2/file
-- 上传服务器地址为: https://tmplink-upload-acc.vxtrans.com/app/upload_slice
-
-#### 使用示例
-
-**基本上传**:
 ```bash
-./tmplink-cli -file document.pdf -token "your_token_here" -task-id "upload-001" -status-file "status.json"
+-server URL               # 服务器地址
+-chunk-size 3145728       # 分片大小(字节)
+-max-retries 3            # 最大重试次数
+-timeout 300              # 超时时间(秒)
+-model 0                  # 文件有效期
+-mr-id "0"                # 资源ID
+-skip-upload 1            # 启用秒传
+-debug                    # 调试模式
 ```
 
-**自定义分片大小**:
-```bash
-./tmplink-cli -file largefile.zip -token "your_token_here" -task-id "upload-002" -status-file "status.json" -chunk-size 10485760
-```
+### 状态文件格式
 
-**指定服务器**:
-```bash
-./tmplink-cli -file video.mp4 -token "your_token_here" -task-id "upload-003" -status-file "status.json" -server "https://tmplink-upload-acc.vxtrans.com/app/upload_slice"
-```
-
-#### 状态文件格式
-
-CLI 通过 JSON 状态文件与 TUI 通信：
+CLI 程序通过 JSON 状态文件与 GUI 通信：
 
 ```json
 {
-  "task_id": "upload-001",
+  "id": "task_1640995200",
   "status": "uploading",
-  "file_path": "/path/to/file.pdf",
-  "file_name": "file.pdf",
+  "file_path": "/path/to/file.txt",
+  "file_name": "file.txt", 
   "file_size": 1048576,
-  "uploaded": 524288,
-  "progress": 50.0,
-  "speed": "1.2 MB/s",
-  "eta": "30s",
-  "error": "",
-  "created_at": "2024-01-01T10:00:00Z",
-  "updated_at": "2024-01-01T10:00:30Z"
+  "progress": 75.5,
+  "download_url": "",
+  "error_msg": "",
+  "created_at": "2023-12-31T12:00:00Z",
+  "updated_at": "2023-12-31T12:01:00Z"
 }
 ```
 
-## Token 获取
+#### 状态值说明
+- `pending`: 任务创建，准备开始
+- `in_progress`: 正在上传
+- `completed`: 上传完成
+- `failed`: 上传失败
 
-1. 访问 https://tmp.link/ 并登录
-2. 打开浏览器开发者工具 (F12)
-3. 在 Console 中执行: `localStorage.getItem('token')`
-4. 复制返回的 token 值
+### 使用示例
 
-## 构建和安装
-
-### 编译程序
-
+#### 基本上传
 ```bash
-# 编译所有组件
-make build
-
-# 仅编译 TUI
-make build-gui
-
-# 仅编译 CLI
-make build-cli
-
-# 跨平台编译
-make build-all
+./tmplink-cli \
+  -file document.pdf \
+  -token "your_token_here" \
+  -task-id "upload-001" \
+  -status-file "status.json"
 ```
 
-### 安装依赖
-
+#### 大文件上传 (10MB 分片)
 ```bash
-make deps
+./tmplink-cli \
+  -file largefile.zip \
+  -token "your_token_here" \
+  -task-id "upload-002" \
+  -status-file "status.json" \
+  -chunk-size 10485760
 ```
 
-### 代码检查
-
+#### 调试模式上传
 ```bash
-# 格式化代码
-make fmt
-
-# 静态分析
-make vet
-
-# 运行测试
-make test
+./tmplink-cli \
+  -file test.txt \
+  -token "your_token_here" \
+  -task-id "upload-003" \
+  -status-file "status.json" \
+  -debug
 ```
+
+## 进阶功能
+
+### 批量上传
+
+#### 使用脚本批量上传
+```bash
+#!/bin/bash
+TOKEN="your_token_here"
+FILES=("file1.txt" "file2.txt" "file3.txt")
+
+for i in "${!FILES[@]}"; do
+  TASK_ID="batch_upload_$i"
+  STATUS_FILE="status_$i.json"
+  
+  ./tmplink-cli \
+    -file "${FILES[$i]}" \
+    -token "$TOKEN" \
+    -task-id "$TASK_ID" \
+    -status-file "$STATUS_FILE" &
+done
+
+wait  # 等待所有上传完成
+```
+
+### 监控上传进度
+
+#### 实时监控状态文件
+```bash
+#!/bin/bash
+STATUS_FILE="status.json"
+
+while true; do
+  if [ -f "$STATUS_FILE" ]; then
+    STATUS=$(cat "$STATUS_FILE" | jq -r '.status')
+    PROGRESS=$(cat "$STATUS_FILE" | jq -r '.progress')
+    
+    echo "状态: $STATUS, 进度: $PROGRESS%"
+    
+    if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+      break
+    fi
+  fi
+  
+  sleep 2
+done
+```
+
+### 错误处理和重试
+
+#### 自动重试脚本
+```bash
+#!/bin/bash
+MAX_ATTEMPTS=3
+ATTEMPT=1
+
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+  echo "尝试第 $ATTEMPT 次上传..."
+  
+  ./tmplink-cli \
+    -file "$1" \
+    -token "$2" \
+    -task-id "retry_$ATTEMPT" \
+    -status-file "status_retry.json"
+  
+  if [ $? -eq 0 ]; then
+    echo "上传成功!"
+    break
+  else
+    echo "上传失败，$(($MAX_ATTEMPTS - $ATTEMPT)) 次重试机会剩余"
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 5
+  fi
+done
+```
+
+## 配置文件
+
+### 配置文件位置
+- Linux/macOS: `~/.tmplink_config.json`
+- Windows: `%USERPROFILE%/.tmplink_config.json`
+
+### 配置文件格式
+```json
+{
+  "token": "your_api_token",
+  "upload_server": "https://tmplink-sec.vxtrans.com/api_v2",
+  "chunk_size": 3145728,
+  "max_concurrent": 5,
+  "timeout": 300,
+  "model": 0,
+  "mr_id": "0",
+  "skip_upload": 1,
+  "debug": false
+}
+```
+
+### 配置项说明
+- `token`: API 访问令牌
+- `upload_server`: 上传服务器地址
+- `chunk_size`: 分片大小(字节)
+- `max_concurrent`: 最大并发数
+- `timeout`: 请求超时时间(秒)
+- `model`: 文件有效期设置
+- `mr_id`: 默认资源目录
+- `skip_upload`: 是否启用秒传
+- `debug`: 是否开启调试模式
 
 ## 故障排除
 
 ### 常见问题
 
-**Token 无效**:
-- 检查 token 是否正确复制
-- 确认 TmpLink 账户未过期
-- 重新获取 token
+#### Token 相关
+**问题**: Token 无效错误
+**解决**:
+1. 确认从正确位置获取 token
+2. 检查 token 是否完整复制
+3. 确认账户未过期或被限制
 
-**上传失败**:
-- 检查网络连接
-- 确认文件大小在限制范围内
-- 查看错误日志
+#### 上传失败
+**问题**: 文件上传失败
+**解决**:
+1. 检查网络连接稳定性
+2. 确认文件大小在限制范围内
+3. 使用 `-debug` 参数查看详细错误
+4. 检查磁盘空间是否充足
 
-**进度显示异常**:
-- 检查状态文件权限
-- 确认磁盘空间充足
-- 重新启动程序
+#### 状态码 7 错误
+**问题**: 收到状态码 7 错误
+**解决**:
+1. 检查 `mr_id` 参数设置
+2. 确认目标文件夹存在
+3. 验证用户权限
+
+#### 进度显示异常
+**问题**: 进度不更新或显示错误
+**解决**:
+1. 检查状态文件权限
+2. 确认状态文件路径正确
+3. 重启程序重新初始化
 
 ### 日志和调试
 
-程序运行时会输出详细的状态信息，包括：
-- API 请求和响应
-- 文件分析结果
-- 上传进度和错误信息
+#### 启用调试模式
+```bash
+./tmplink-cli -debug -file test.txt -token YOUR_TOKEN -task-id test -status-file status.json
+```
 
-## 注意事项
+#### 查看详细日志
+调试模式会输出：
+- API 请求和响应详情
+- 文件处理进度信息
+- 错误堆栈信息
+- 网络连接状态
 
-1. **文件大小限制**: 单文件最大支持 80MB 分片
-2. **并发限制**: 建议同时上传文件数不超过 10 个
-3. **网络要求**: 需要稳定的互联网连接
-4. **存储空间**: 确保目标平台有足够存储空间
-5. **Token 安全**: 妥善保管 API token，避免泄露
+#### 状态文件检查
+```bash
+# 查看当前状态
+cat status.json | jq '.'
 
-## 技术支持
+# 监控状态变化
+watch -n 1 'cat status.json | jq ".status, .progress"'
+```
 
-如遇到问题，请检查：
-1. 程序版本和依赖
-2. 网络连接状态
-3. API token 有效性
-4. 文件权限设置
+## 性能优化
+
+### 上传性能调优
+
+#### 分片大小选择
+- **小文件 (<10MB)**: 使用 1-3MB 分片
+- **中等文件 (10MB-100MB)**: 使用 3-10MB 分片  
+- **大文件 (>100MB)**: 使用 10-80MB 分片
+
+#### 并发数设置
+- **网络良好**: 可设置 5-10 并发
+- **网络一般**: 建议 3-5 并发
+- **网络较差**: 使用 1-2 并发
+
+#### 超时时间设置
+- **本地网络**: 60-120 秒
+- **公共网络**: 180-300 秒
+- **移动网络**: 300-600 秒
+
+### 系统资源优化
+
+#### 内存使用
+- 分片大小直接影响内存占用
+- 大文件建议分多次上传
+- 监控系统内存使用情况
+
+#### 网络带宽
+- 根据带宽调整并发数
+- 避免占满带宽影响其他应用
+- 考虑设置速率限制
+
+## 高级配置
+
+### 网络代理设置
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+./tmplink-cli [参数...]
+```
+
+### 自定义服务器
+```bash
+./tmplink-cli \
+  -server "https://custom-server.example.com/api" \
+  [其他参数...]
+```
+
+### 环境变量配置
+```bash
+export TMPLINK_TOKEN="your_token"
+export TMPLINK_CHUNK_SIZE="5242880"
+export TMPLINK_DEBUG="true"
+
+./tmplink-cli -file test.txt -task-id test -status-file status.json
+```
