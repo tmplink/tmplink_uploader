@@ -25,12 +25,16 @@ go.sum.backup
 
 # 配置和状态文件
 .tmplink/
-*.json
+config.json
+*_config.json
+status*.json
+task*.json
 
 # 测试数据
 test_*.txt
+test_*.dat
 test/
-reference/
-
-# 测试集成文件目录
 tests/
+
+# 参考文件
+reference/
