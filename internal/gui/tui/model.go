@@ -78,6 +78,7 @@ type TaskStatus struct {
 	FileName    string    `json:"file_name"`
 	FileSize    int64     `json:"file_size"`
 	Progress    float64   `json:"progress"`
+	UploadSpeed float64   `json:"upload_speed,omitempty"` // KB/s
 	DownloadURL string    `json:"download_url,omitempty"`
 	ErrorMsg    string    `json:"error_msg,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -115,6 +116,7 @@ type Model struct {
 	currentDir    string
 	files         []FileInfo
 	selectedIndex int
+	showHidden    bool
 	
 	// 设置界面状态
 	settingsIndex int
@@ -126,7 +128,6 @@ type Model struct {
 	height        int
 	statusFiles   map[string]string // taskID -> statusFile path
 	isLoading     bool
-	uploadSpeed   float64 // KB/s
 	activeUploads int
 }
 
@@ -251,6 +252,7 @@ func NewModel(cliPath string) Model {
 		currentDir:     currentDir,
 		files:          []FileInfo{},
 		selectedIndex:  0,
+		showHidden:     false, // 默认不显示隐藏文件
 		settingsIndex:  0,
 		settingsInputs: settingsInputs,
 		uploadTasks:    make([]TaskStatus, 0),
@@ -390,22 +392,27 @@ func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.handleFileSelection()
-	case "up", "k":
+	case "up":
 		if m.selectedIndex > 0 {
 			m.selectedIndex--
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		if m.selectedIndex < len(m.files)-1 {
 			m.selectedIndex++
 		}
 		return m, nil
-	case "left", "h":
+	case "left":
 		// 返回上级目录
 		return m.navigateToParent()
-	case "right", "l":
+	case "right":
 		// 进入目录或选择文件
 		return m.handleFileSelection()
+	case "t":
+		// 切换显示隐藏文件
+		m.showHidden = !m.showHidden
+		m.selectedIndex = 0 // 重置选择索引
+		return m, m.loadFiles()
 	}
 
 	return m, nil
@@ -423,7 +430,7 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.state = StateMain
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.settingsIndex > 0 {
 			// 失去当前输入框焦点
 			currentKey := settingsKeys[m.settingsIndex]
@@ -440,7 +447,7 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.settingsInputs[newKey] = newInput
 		}
 		return m, nil
-	case "down", "j":
+	case "down":
 		if m.settingsIndex < len(settingsKeys)-1 {
 			// 失去当前输入框焦点
 			currentKey := settingsKeys[m.settingsIndex]
@@ -482,8 +489,8 @@ func (m Model) handleUploadList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.state = StateMain
 		return m, nil
-	case "delete":
-		// 取消选中的上传任务
+	case "d":
+		// 删除选中的上传任务
 		return m.cancelSelectedUpload()
 	}
 
@@ -555,6 +562,7 @@ func (m Model) handleUploadProgress(msg UploadProgressMsg) (tea.Model, tea.Cmd) 
 	for i, task := range m.uploadTasks {
 		if task.ID == msg.TaskID {
 			m.uploadTasks[i].Progress = msg.Progress
+			m.uploadTasks[i].UploadSpeed = msg.Speed
 			if msg.Progress > 0 {
 				m.uploadTasks[i].Status = "uploading"
 			}
@@ -692,10 +700,14 @@ func (m *Model) updateUploadTable() {
 			statusStr = "失败"
 		}
 		
-		// 速度显示（暂时为空，可以后续添加）
+		// 速度显示（上传中和已完成都显示最终速度）
 		speedStr := ""
-		if task.Status == "uploading" && m.uploadSpeed > 0 {
-			speedStr = fmt.Sprintf("%.1fKB/s", m.uploadSpeed)
+		if task.UploadSpeed > 0 && (task.Status == "uploading" || task.Status == "completed") {
+			if task.UploadSpeed >= 1024 {
+				speedStr = fmt.Sprintf("%.1fMB/s", task.UploadSpeed/1024)
+			} else {
+				speedStr = fmt.Sprintf("%.1fKB/s", task.UploadSpeed)
+			}
 		}
 		
 		row := table.Row{
@@ -786,8 +798,19 @@ func (m Model) renderStatusBar() string {
 		// 添加上传状态（如果有）
 		if m.activeUploads > 0 {
 			uploadText := fmt.Sprintf(" | 上传中: %d个文件", m.activeUploads)
-			if m.uploadSpeed > 0 {
-				uploadText += fmt.Sprintf(" (%.1fKB/s)", m.uploadSpeed)
+			// 计算总体上传速度
+			totalSpeed := 0.0
+			for _, task := range m.uploadTasks {
+				if task.Status == "uploading" {
+					totalSpeed += task.UploadSpeed
+				}
+			}
+			if totalSpeed > 0 {
+				if totalSpeed >= 1024 {
+					uploadText += fmt.Sprintf(" (%.1fMB/s)", totalSpeed/1024)
+				} else {
+					uploadText += fmt.Sprintf(" (%.1fKB/s)", totalSpeed)
+				}
 			}
 			storageText += uploadText
 		}
@@ -796,8 +819,19 @@ func (m Model) renderStatusBar() string {
 	} else {
 		if m.activeUploads > 0 {
 			line2 = fmt.Sprintf("上传中: %d个文件", m.activeUploads)
-			if m.uploadSpeed > 0 {
-				line2 += fmt.Sprintf(" (%.1fKB/s)", m.uploadSpeed)
+			// 计算总体上传速度
+			totalSpeed := 0.0
+			for _, task := range m.uploadTasks {
+				if task.Status == "uploading" {
+					totalSpeed += task.UploadSpeed
+				}
+			}
+			if totalSpeed > 0 {
+				if totalSpeed >= 1024 {
+					line2 += fmt.Sprintf(" (%.1fMB/s)", totalSpeed/1024)
+				} else {
+					line2 += fmt.Sprintf(" (%.1fKB/s)", totalSpeed)
+				}
 			}
 		} else {
 			line2 = "存储信息: 加载中..."
@@ -809,20 +843,32 @@ func (m Model) renderStatusBar() string {
 	var line3 string
 	switch m.state {
 	case StateMain:
-		line3 = "操作: ↑↓/jk:选择 ←/h:上级目录 →/l/Enter:进入 Tab:设置 Q:退出"
+		line3 = "↑↓:选择 ←:上级 →:进入 t:隐藏文件 Tab:设置 Q:退出"
 	case StateSettings:
-		line3 = "操作: ↑↓/jk:选择设置 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
+		line3 = "↑↓:选择 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
 	case StateUploadList:
-		line3 = "操作: ↑↓/jk:选择任务 Del:取消 Tab:文件浏览 Esc:返回 Q:退出"
+		line3 = "↑↓:选择 d:删除 Tab:文件浏览 Esc:返回 Q:退出"
 	case StateError:
 		line3 = "操作: Enter:重试 Esc:返回 Q:退出"
 	default:
 		line3 = "操作: Q:退出"
 	}
 	
-	// 确保操作提示不超过宽度
+	// 确保操作提示不超过宽度，优先保留Q:退出
 	if len(line3) > statusWidth {
-		line3 = line3[:statusWidth-3] + "..."
+		// 如果包含Q:退出，尝试保留它
+		if strings.Contains(line3, "Q:退出") {
+			// 计算Q:退出需要的空间
+			quitPart := " Q:退出"
+			if statusWidth > len(quitPart)+6 { // 6 = "..." + 一些空间
+				maxLen := statusWidth - len(quitPart) - 3
+				line3 = line3[:maxLen] + "..." + quitPart
+			} else {
+				line3 = line3[:statusWidth-3] + "..."
+			}
+		} else {
+			line3 = line3[:statusWidth-3] + "..."
+		}
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line3))
 	
@@ -857,7 +903,11 @@ func (m Model) renderMainView() string {
 	var s strings.Builder
 	
 	// 标题和当前路径
-	s.WriteString(titleStyle.Render("文件浏览器"))
+	title := "文件浏览器"
+	if m.showHidden {
+		title += " (显示隐藏文件)"
+	}
+	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n")
 	s.WriteString(fmt.Sprintf("当前目录: %s\n\n", m.currentDir))
 	
@@ -1054,7 +1104,7 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 		}()
 		
 		// 开始监控进度
-		return UploadProgressMsg{TaskID: taskID, Progress: 0.0}
+		return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
 	}
 }
 
@@ -1169,13 +1219,13 @@ func (m Model) checkProgress(taskID string) tea.Cmd {
 		if err != nil {
 			// 文件可能还没创建，等待1秒后再次检查
 			time.Sleep(time.Second)
-			return UploadProgressMsg{TaskID: taskID, Progress: 0.0}
+			return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
 		}
 		
 		var task TaskStatus
 		if err := json.Unmarshal(data, &task); err != nil {
 			time.Sleep(time.Second)
-			return UploadProgressMsg{TaskID: taskID, Progress: 0.0}
+			return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
 		}
 		
 		switch task.Status {
@@ -1186,7 +1236,7 @@ func (m Model) checkProgress(taskID string) tea.Cmd {
 		default:
 			// 延迟1秒后继续监控
 			time.Sleep(time.Second)
-			return UploadProgressMsg{TaskID: taskID, Progress: task.Progress}
+			return UploadProgressMsg{TaskID: taskID, Progress: task.Progress, Speed: task.UploadSpeed}
 		}
 	}
 }
@@ -1195,6 +1245,7 @@ func (m Model) checkProgress(taskID string) tea.Cmd {
 type UploadProgressMsg struct {
 	TaskID   string
 	Progress float64
+	Speed    float64 // KB/s
 }
 
 type UploadCompleteMsg struct {
@@ -1399,7 +1450,7 @@ type FilesLoadedMsg struct {
 // loadFiles 加载当前目录的文件列表
 func (m Model) loadFiles() tea.Cmd {
 	return func() tea.Msg {
-		files, err := loadDirectoryFiles(m.currentDir)
+		files, err := loadDirectoryFiles(m.currentDir, m.showHidden)
 		if err != nil {
 			return UserInfoErrorMsg{Error: fmt.Sprintf("加载目录失败: %v", err)}
 		}
@@ -1408,7 +1459,7 @@ func (m Model) loadFiles() tea.Cmd {
 }
 
 // loadDirectoryFiles 读取目录中的文件
-func loadDirectoryFiles(dirPath string) ([]FileInfo, error) {
+func loadDirectoryFiles(dirPath string, showHidden bool) ([]FileInfo, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return nil, err
@@ -1428,6 +1479,11 @@ func loadDirectoryFiles(dirPath string) ([]FileInfo, error) {
 		info, err := entry.Info()
 		if err != nil {
 			continue // 跳过无法读取的文件
+		}
+		
+		// 过滤隐藏文件（以.开头的文件）
+		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
+			continue
 		}
 		
 		files = append(files, FileInfo{

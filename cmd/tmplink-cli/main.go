@@ -54,6 +54,7 @@ type TaskStatus struct {
 	FileName    string    `json:"file_name"`
 	FileSize    int64     `json:"file_size"`
 	Progress    float64   `json:"progress"`
+	UploadSpeed float64   `json:"upload_speed,omitempty"` // KB/s
 	DownloadURL string    `json:"download_url,omitempty"`
 	ErrorMsg    string    `json:"error_msg,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -64,6 +65,54 @@ type TaskStatus struct {
 type UploadResult struct {
 	DownloadURL string
 	FileID      string
+}
+
+// 速度计算器
+type SpeedCalculator struct {
+	startTime     time.Time
+	lastTime      time.Time
+	lastBytes     int64
+	totalBytes    int64
+	currentSpeed  float64 // KB/s
+}
+
+// NewSpeedCalculator 创建新的速度计算器
+func NewSpeedCalculator(totalBytes int64) *SpeedCalculator {
+	now := time.Now()
+	return &SpeedCalculator{
+		startTime:    now,
+		lastTime:     now,
+		lastBytes:    0,
+		totalBytes:   totalBytes,
+		currentSpeed: 0,
+	}
+}
+
+// UpdateSpeed 更新上传速度
+func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
+	now := time.Now()
+	timeDiff := now.Sub(sc.lastTime).Seconds()
+	
+	// 至少间隔1秒才更新速度
+	if timeDiff >= 1.0 {
+		bytesDiff := uploadedBytes - sc.lastBytes
+		if bytesDiff > 0 && timeDiff > 0 {
+			// 计算瞬时速度 (KB/s)
+			instantSpeed := float64(bytesDiff) / 1024.0 / timeDiff
+			
+			// 使用加权平均平滑速度波动
+			if sc.currentSpeed == 0 {
+				sc.currentSpeed = instantSpeed
+			} else {
+				sc.currentSpeed = sc.currentSpeed*0.7 + instantSpeed*0.3
+			}
+		}
+		
+		sc.lastTime = now
+		sc.lastBytes = uploadedBytes
+	}
+	
+	return sc.currentSpeed
 }
 
 func main() {
@@ -141,13 +190,20 @@ func main() {
 	debugPrint(config, "分片大小: %d bytes (%.1f MB)", *chunkSize, float64(*chunkSize)/(1024*1024))
 	debugPrint(config, "API服务器: %s", *apiServer)
 
+	// 创建速度计算器
+	speedCalc := NewSpeedCalculator(fileInfo.Size())
+	
 	// 设置进度回调
 	progressCallback := func(uploaded, total int64) {
 		progress := float64(uploaded) / float64(total) * 100
 
+		// 计算上传速度
+		speed := speedCalc.UpdateSpeed(uploaded)
+
 		// 更新任务状态
 		task.Status = "uploading"
 		task.Progress = progress
+		task.UploadSpeed = speed
 		task.UpdatedAt = time.Now()
 
 		// 保存状态到文件
@@ -299,9 +355,13 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 	
 	client := &http.Client{Timeout: config.Timeout}
 	
-	// 添加重试计数器，防止无限循环
-	retryCount := 0
-	maxRetries := 50
+	// 添加循环计数器，防止无限循环
+	loopCount := 0
+	maxLoops := 1000 // 允许最多1000次状态机循环
+	
+	// 连续失败计数器
+	consecutiveErrors := 0
+	maxConsecutiveErrors := 10
 	
 	for {
 		select {
@@ -310,14 +370,14 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 		default:
 		}
 		
-		// 检查重试次数
-		retryCount++
-		if retryCount > maxRetries {
-			return "", fmt.Errorf("上传重试次数过多，可能服务器存在问题")
+		// 检查循环次数，防止无限循环
+		loopCount++
+		if loopCount > maxLoops {
+			return "", fmt.Errorf("上传超时，状态机循环次数过多（%d次）", loopCount)
 		}
 		
 		// 查询分片信息 (prepare)
-		debugPrint(config, "========== API请求 #%d ==========", retryCount)
+		debugPrint(config, "========== API请求 #%d ==========", loopCount)
 		prepareData := fmt.Sprintf("token=%s&uptoken=%s&action=prepare&sha1=%s&filename=%s&filesize=%d&slice_size=%d&utoken=%s&mr_id=%s&model=%d",
 			config.Token, upToken, sha1Hash, fileName, fileSize, config.ChunkSize, utoken, config.MrID, config.Model)
 		
@@ -336,16 +396,39 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 		resp, err := client.Do(req)
 		if err != nil {
 			debugPrint(config, "发送请求失败: %v", err)
-			return "", err
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return "", fmt.Errorf("连续网络错误过多（%d次）: %w", consecutiveErrors, err)
+			}
+			debugPrint(config, "网络错误，等待2秒后重试...")
+			time.Sleep(2 * time.Second)
+			continue
 		}
 		defer resp.Body.Close()
 
 		debugPrint(config, "HTTP状态码: %d", resp.StatusCode)
 
+		if resp.StatusCode != http.StatusOK {
+			debugPrint(config, "HTTP状态码错误: %d", resp.StatusCode)
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return "", fmt.Errorf("连续HTTP错误过多（%d次），状态码: %d", consecutiveErrors, resp.StatusCode)
+			}
+			debugPrint(config, "HTTP错误，等待2秒后重试...")
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			debugPrint(config, "读取响应失败: %v", err)
-			return "", err
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return "", fmt.Errorf("连续读取错误过多（%d次）: %w", consecutiveErrors, err)
+			}
+			debugPrint(config, "读取错误，等待2秒后重试...")
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		debugPrint(config, "响应内容: %s", string(body))
@@ -358,8 +441,17 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 
 		if err := json.Unmarshal(body, &prepareResp); err != nil {
 			debugPrint(config, "JSON解析失败: %v", err)
-			return "", fmt.Errorf("解析prepare响应失败: %w", err)
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return "", fmt.Errorf("连续JSON解析错误过多（%d次）: %w", consecutiveErrors, err)
+			}
+			debugPrint(config, "JSON解析错误，等待2秒后重试...")
+			time.Sleep(2 * time.Second)
+			continue
 		}
+		
+		// 成功收到响应，重置连续错误计数器
+		consecutiveErrors = 0
 		
 		debugPrint(config, "解析结果 - 状态码: %d, 数据: %v, Debug: %v", prepareResp.Status, prepareResp.Data, prepareResp.Debug)
 
@@ -417,12 +509,28 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 					nextSlice := int(nextFloat)
 					debugPrint(config, "上传分片 #%d", nextSlice)
 					
-					// 上传分片
-					err := uploadSlice(ctx, client, config, filePath, fileName, upToken, nextSlice, progressCallback)
-					if err != nil {
-						return "", fmt.Errorf("上传分片 %d 失败: %w", nextSlice, err)
+					// 上传分片（带重试）
+					sliceRetryCount := 0
+					maxSliceRetries := config.MaxRetries
+					for sliceRetryCount < maxSliceRetries {
+						err := uploadSlice(ctx, client, config, filePath, fileName, upToken, nextSlice, progressCallback)
+						if err == nil {
+							debugPrint(config, "分片 #%d 上传完成", nextSlice)
+							break
+						}
+						
+						sliceRetryCount++
+						debugPrint(config, "分片 #%d 上传失败（第%d次重试）: %v", nextSlice, sliceRetryCount, err)
+						
+						if sliceRetryCount >= maxSliceRetries {
+							return "", fmt.Errorf("分片 %d 上传失败，已重试%d次: %w", nextSlice, maxSliceRetries, err)
+						}
+						
+						// 等待后重试
+						waitTime := time.Duration(sliceRetryCount*sliceRetryCount) * time.Second // 指数退避
+						debugPrint(config, "等待 %v 后重试分片 #%d", waitTime, nextSlice)
+						time.Sleep(waitTime)
 					}
-					debugPrint(config, "分片 #%d 上传完成", nextSlice)
 					
 					// 继续下一轮查询
 					continue
