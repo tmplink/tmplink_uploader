@@ -31,3 +31,6 @@ go.sum.backup
 test_*.txt
 test/
 reference/
+
+# 测试集成文件目录
+tests/
