@@ -294,8 +294,8 @@ func NewModel(cliPath string) Model {
 		{Title: "文件名", Width: 30},
 		{Title: "大小", Width: 10},
 		{Title: "进度", Width: 10},
-		{Title: "状态", Width: 10},
 		{Title: "速度", Width: 10},
+		{Title: "状态", Width: 10},
 	}
 	
 	uploadTable := table.New(
@@ -909,8 +909,8 @@ func (m *Model) updateUploadTable() {
 			task.FileName,
 			sizeStr,
 			progressStr,
-			statusStr,
 			speedStr,
+			statusStr,
 		}
 		rows = append(rows, row)
 	}
