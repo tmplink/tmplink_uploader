@@ -187,23 +187,22 @@ type UploadResult struct {
     └─→ 文件大小/类型验证
 ```
 
-### 重试机制
+### 错误处理机制
+
+采用快速失败策略，遇到错误立即返回详细错误信息：
 
 ```go
-type RetryConfig struct {
-    MaxRetries    int
-    BaseDelay     time.Duration
-    MaxDelay      time.Duration
-    BackoffFactor float64
+type ErrorConfig struct {
+    EnableDebug   bool
+    LogLevel      string
+    TimeoutMs     int
 }
 
-func exponentialBackoff(attempt int, config RetryConfig) time.Duration {
-    delay := time.Duration(float64(config.BaseDelay) * 
-            math.Pow(config.BackoffFactor, float64(attempt)))
-    if delay > config.MaxDelay {
-        delay = config.MaxDelay
+func fastFail(err error, config ErrorConfig) error {
+    if config.EnableDebug {
+        log.Printf("ERROR: %v", err)
     }
-    return delay
+    return fmt.Errorf("操作失败: %w", err)
 }
 ```
 
@@ -273,20 +272,19 @@ wg.Wait()
 ```go
 type ErrorHandler struct {
     Logger    *log.Logger
-    Retrier   *RetryConfig
     Notifier  func(error)
 }
 
 func (h *ErrorHandler) Handle(err error) error {
     switch e := err.(type) {
     case *NetworkError:
-        return h.handleNetworkError(e)
+        return h.logAndReturn(e)
     case *APIError:
-        return h.handleAPIError(e)
+        return h.logAndReturn(e)
     case *UserError:
-        return h.handleUserError(e)
+        return h.logAndReturn(e)
     default:
-        return h.handleUnknownError(e)
+        return h.logAndReturn(e)
     }
 }
 ```

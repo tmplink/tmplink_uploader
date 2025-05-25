@@ -37,7 +37,7 @@ This is a dual-process uploader tool for [钛盘](https://tmp.link/), written in
 2. **Progress Tracking**: Real-time progress with upload speed calculation via status file updates
 3. **Resumable Uploads**: SHA1-based deduplication and instant uploads
 4. **Multi-threading**: Concurrent chunk uploads within each CLI process
-5. **Error Handling**: Automatic retry with configurable retry count and improved error messages
+5. **Error Handling**: Fast-fail approach with clear error messages
 6. **Upload Speed Display**: Real-time speed monitoring with weighted averaging algorithm
 7. **Server Selection**: Dynamic server list from API with manual selection for sponsored users
 
@@ -168,7 +168,6 @@ The tmplink-cli process accepts the following command-line parameters:
 - `-api-server`: API server URL (default: https://tmplink-sec.vxtrans.com/api_v2)
 - `-upload-server`: Force specific upload server URL (optional, overrides API server selection)
 - `-chunk-size`: Chunk size in bytes (default: 3MB, max: 80MB)
-- `-max-retries`: Maximum retry attempts (default: 3)
 - `-timeout`: Request timeout in seconds (default: 300)
 - `-model`: File expiration period (default: 0, 24 hours)
   - `0`: 24 hours (default)
@@ -249,7 +248,7 @@ The CLI automatically handles the following internally:
 ### Error Handling
 - All functions return errors using Go conventions
 - User-friendly error messages in Chinese
-- Retry logic for network failures
+- Fast-fail error handling for immediate feedback
 
 ### Concurrency
 - Upload workers run in separate goroutines
@@ -261,7 +260,7 @@ The CLI automatically handles the following internally:
 - Default values: 3MB chunks, 5 concurrent uploads, 300s upload timeout
 - Settings persist between sessions
 - Configurable upload timeout for large files (default 5 minutes)
-- Automatic retry mechanism with exponential backoff (max 3 retries)
+- Fast-fail error handling for quick error identification
 
 ### Security
 - Token-based authentication
@@ -337,10 +336,44 @@ The Go client handles dynamic API responses:
 - **Navigation improvements**: Arrow-key-only navigation and hidden file toggle verified
 
 ### Recent Bug Fixes and Improvements
-- **Critical retry logic fix**: Resolved loop counter vs retry counter confusion causing 50% upload failures
+- **Retry mechanism removal**: Removed all retry logic for faster error feedback and simplified code
 - **Token validation enhancement**: Two-phase JSON parsing for better error messages when tokens expire
 - **Upload speed implementation**: Added SpeedCalculator with weighted averaging for accurate speed monitoring
 - **Server address handling**: Fixed GUI server selection to properly pass upload server addresses to CLI
 - **Dynamic server lists**: Replaced hardcoded server lists with real-time API retrieval
 - **Permission system**: Implemented sponsor-only features with graceful degradation for regular users
 - **UI navigation**: Streamlined keyboard shortcuts and improved status bar visibility
+
+### Critical Bug Fix (2025-05-25): GUI Upload Process Communication
+**Problem**: GUI file selection showed "启动中" (starting) status indefinitely with no actual upload progress or network traffic.
+
+**Root Cause**: Variable shadowing bug in CLI `uploadFile` function (line 317):
+```go
+// WRONG: This creates a new local variable, leaving outer uploadInfo as nil
+uploadInfo, err := getUTokenOnly(ctx, config, sha1Hash, fileName, fileInfo.Size())
+
+// CORRECT: This assigns to the already declared variable
+uploadInfo, err = getUTokenOnly(ctx, config, sha1Hash, fileName, fileInfo.Size())
+```
+
+**Impact**: 
+- CLI processes launched by GUI would crash with null pointer dereference
+- Status files remained in "starting" state
+- No actual file upload occurred despite appearing in task list
+
+**Solution Applied**:
+1. **Fixed Variable Shadowing**: Corrected assignment in both GUI and CLI code paths
+2. **Enhanced Error Handling**: CLI now properly handles uploadInfo initialization 
+3. **Improved Process Monitoring**: GUI checkProgress function already handled missing status files correctly
+
+**Verification**:
+- CLI independent mode: ✅ Works correctly
+- GUI to CLI communication: ✅ Fixed and functional
+- Process tracking: ✅ PID correctly recorded in status files
+- Upload progress: ✅ Real-time progress monitoring restored
+
+**Files Modified**:
+- `cmd/tmplink-cli/main.go`: Lines 317, 328 - Fixed variable shadowing
+- `internal/gui/tui/model.go`: Improved process startup coordination
+
+This fix resolves the core issue where GUI users experienced phantom upload tasks that never actually uploaded files.

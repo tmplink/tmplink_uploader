@@ -23,12 +23,9 @@ type Config struct {
 	Server       string
 	UploadServer string  // 分片上传服务器
 	ChunkSize    int
-	MaxRetries   int
-	Timeout      time.Duration
 	Model        int
 	MrID         string
 	SkipUpload   int
-	UID          string  // 用户ID，用于生成uptoken
 	Debug        bool    // 调试模式
 }
 
@@ -55,6 +52,8 @@ type TaskStatus struct {
 	FileSize    int64     `json:"file_size"`
 	Progress    float64   `json:"progress"`
 	UploadSpeed float64   `json:"upload_speed,omitempty"` // KB/s
+	ServerName  string    `json:"server_name,omitempty"`  // 上传服务器名称
+	ProcessID   int       `json:"process_id,omitempty"`   // CLI进程号
 	DownloadURL string    `json:"download_url,omitempty"`
 	ErrorMsg    string    `json:"error_msg,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -93,8 +92,8 @@ func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
 	now := time.Now()
 	timeDiff := now.Sub(sc.lastTime).Seconds()
 	
-	// 至少间隔1秒才更新速度
-	if timeDiff >= 1.0 {
+	// 降低时间间隔要求，对小文件更友好（0.5秒而不是1秒）
+	if timeDiff >= 0.5 {
 		bytesDiff := uploadedBytes - sc.lastBytes
 		if bytesDiff > 0 && timeDiff > 0 {
 			// 计算瞬时速度 (KB/s)
@@ -115,6 +114,29 @@ func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
 	return sc.currentSpeed
 }
 
+// GetFinalSpeed 计算最终平均速度（用于上传完成时）
+func (sc *SpeedCalculator) GetFinalSpeed() float64 {
+	now := time.Now()
+	totalTime := now.Sub(sc.startTime).Seconds()
+	
+	// 如果总时间太短（小于0.1秒），计算理论最大速度
+	if totalTime < 0.1 {
+		totalTime = 0.1 // 假设最少0.1秒
+	}
+	
+	// 计算总体平均速度 (KB/s)
+	if totalTime > 0 && sc.totalBytes > 0 {
+		avgSpeed := float64(sc.totalBytes) / 1024.0 / totalTime
+		// 返回当前速度和平均速度中较大的那个（更准确）
+		if sc.currentSpeed > 0 {
+			return sc.currentSpeed
+		}
+		return avgSpeed
+	}
+	
+	return sc.currentSpeed
+}
+
 func main() {
 	// 定义命令行参数
 	var (
@@ -122,9 +144,8 @@ func main() {
 		token        = flag.String("token", "", "TmpLink API token (必需)")
 		apiServer    = flag.String("api-server", "https://tmplink-sec.vxtrans.com/api_v2", "API服务器地址")
 		uploadServer = flag.String("upload-server", "", "强制指定上传服务器地址 (可选，留空自动选择)")
+		serverName   = flag.String("server-name", "", "上传服务器名称 (用于显示)")
 		chunkSize    = flag.Int("chunk-size", 3*1024*1024, "分块大小(字节)")
-		maxRetries   = flag.Int("max-retries", 3, "最大重试次数")
-		timeout      = flag.Int("timeout", 300, "超时时间(秒)")
 		statusFile   = flag.String("status-file", "", "任务状态文件路径 (必需)")
 		taskID       = flag.String("task-id", "", "任务ID (必需)")
 		model        = flag.Int("model", 0, "文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)")
@@ -156,14 +177,16 @@ func main() {
 
 	// 初始化任务状态
 	task := &TaskStatus{
-		ID:        *taskID,
-		Status:    "pending",
-		FilePath:  *filePath,
-		FileName:  filepath.Base(*filePath),
-		FileSize:  fileInfo.Size(),
-		Progress:  0.0,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:         *taskID,
+		Status:     "pending",
+		FilePath:   *filePath,
+		FileName:   filepath.Base(*filePath),
+		FileSize:   fileInfo.Size(),
+		Progress:   0.0,
+		ServerName: *serverName,
+		ProcessID:  os.Getpid(), // 记录当前进程号
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	// 保存初始状态
@@ -178,12 +201,9 @@ func main() {
 		Server:       *apiServer,
 		UploadServer: *uploadServer, // 用户指定的上传服务器
 		ChunkSize:    *chunkSize,
-		MaxRetries:   *maxRetries,
-		Timeout:      time.Duration(*timeout) * time.Second,
 		Model:        *model,
 		MrID:         *mrID,
 		SkipUpload:   *skipUpload,
-		UID:          "", // 将在内部获取
 		Debug:        *debugMode,
 	}
 	
@@ -219,8 +239,7 @@ func main() {
 	task.UpdatedAt = time.Now()
 	saveTaskStatus(*statusFile, task)
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
-	defer cancel()
+	ctx := context.Background()
 
 	result, err := uploadFile(ctx, config, *filePath, progressCallback)
 	if err != nil {
@@ -242,6 +261,8 @@ func main() {
 	task.Progress = 100.0
 	task.UpdatedAt = time.Now()
 	task.DownloadURL = result.DownloadURL
+	// 计算最终速度（确保小文件也有速度显示）
+	task.UploadSpeed = speedCalc.GetFinalSpeed()
 
 	if err := saveTaskStatus(*statusFile, task); err != nil {
 		fmt.Fprintf(os.Stderr, "警告: 保存完成状态失败: %v\n", err)
@@ -287,14 +308,30 @@ func uploadFile(ctx context.Context, config *Config, filePath string, progressCa
 
 	fileName := filepath.Base(filePath)
 
-	// 第一步：调用upload_request_select2获取utoken和服务器列表
-	debugPrint(config, "步骤1: 获取上传服务器列表...")
-	uploadInfo, err := getUploadServers(ctx, config, sha1Hash, fileName, fileInfo.Size())
-	if err != nil {
-		return nil, fmt.Errorf("获取上传服务器失败: %w", err)
+	var uploadInfo *UploadInfo
+	
+	// 检查是否为GUI模式（已预设上传服务器）
+	if config.UploadServer != "" {
+		debugPrint(config, "GUI模式: 使用预设的上传服务器: %s", config.UploadServer)
+		// GUI模式下仍需要获取UToken，但直接使用预设的上传服务器
+		uploadInfo, err = getUTokenOnly(ctx, config, sha1Hash, fileName, fileInfo.Size())
+		if err != nil {
+			return nil, fmt.Errorf("获取UToken失败: %w", err)
+		}
+		// 使用预设的上传服务器
+		uploadInfo.Server = config.UploadServer
+		debugPrint(config, "获取到UToken: %s", uploadInfo.UToken)
+		debugPrint(config, "使用预设上传服务器: %s", uploadInfo.Server)
+	} else {
+		// CLI独立模式：查找可用的上传服务器
+		debugPrint(config, "CLI独立模式: 查找可用上传服务器...")
+		uploadInfo, err = getUploadServers(ctx, config, sha1Hash, fileName, fileInfo.Size())
+		if err != nil {
+			return nil, fmt.Errorf("获取上传服务器失败: %w", err)
+		}
+		debugPrint(config, "获取到UToken: %s", uploadInfo.UToken)
+		debugPrint(config, "找到上传服务器: %s", uploadInfo.Server)
 	}
-	debugPrint(config, "获取到UToken: %s", uploadInfo.UToken)
-	debugPrint(config, "上传服务器: %s", uploadInfo.Server)
 
 	// 第二步：调用prepare_v4检查是否可以秒传
 	debugPrint(config, "步骤2: 检查是否支持秒传...")
@@ -309,18 +346,8 @@ func uploadFile(ctx context.Context, config *Config, filePath string, progressCa
 	}
 	debugPrint(config, "需要分片上传")
 
-	// 第三步：获取用户UID
-	if config.UID == "" {
-		debugPrint(config, "步骤3: 获取用户UID...")
-		config.UID, err = getUserUID(ctx, config)
-		if err != nil {
-			return nil, fmt.Errorf("获取用户UID失败: %w", err)
-		}
-		debugPrint(config, "用户UID: %s", config.UID)
-	}
-
-	// 第四步：执行分片上传逻辑
-	debugPrint(config, "步骤4: 开始分片上传...")
+	// 第三步：执行分片上传逻辑
+	debugPrint(config, "步骤3: 开始分片上传...")
 	downloadURL, err = workerSlice(ctx, config, filePath, sha1Hash, fileName, fileInfo.Size(), uploadInfo.UToken, progressCallback)
 	if err != nil {
 		return nil, fmt.Errorf("分片上传失败: %w", err)
@@ -347,23 +374,20 @@ func calculateSHA1(filePath string) (string, error) {
 
 // workerSlice 分片上传核心逻辑，基于 JavaScript 实现
 func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileName string, fileSize int64, utoken string, progressCallback func(int64, int64)) (string, error) {
-	// 生成uptoken (按照JS逻辑: SHA1(uid + filename + filesize + slice_size))
-	upTokenData := fmt.Sprintf("%s%s%d%d", config.UID, fileName, fileSize, config.ChunkSize)
+	// 生成uptoken (基于文件特征: SHA1(sha1 + filename + filesize + slice_size))
+	upTokenData := fmt.Sprintf("%s%s%d%d", sha1Hash, fileName, fileSize, config.ChunkSize)
 	upTokenHash := sha1.Sum([]byte(upTokenData))
 	upToken := hex.EncodeToString(upTokenHash[:])
 	
 	debugPrint(config, "生成uptoken: %s -> %s", upTokenData, upToken)
 	debugPrint(config, "开始分片上传状态机循环...")
 	
-	client := &http.Client{Timeout: config.Timeout}
+	client := &http.Client{}
 	
 	// 添加循环计数器，防止无限循环
 	loopCount := 0
 	maxLoops := 1000 // 允许最多1000次状态机循环
 	
-	// 连续失败计数器
-	consecutiveErrors := 0
-	maxConsecutiveErrors := 10
 	
 	for {
 		select {
@@ -398,13 +422,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 		resp, err := client.Do(req)
 		if err != nil {
 			debugPrint(config, "发送请求失败: %v", err)
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveErrors {
-				return "", fmt.Errorf("连续网络错误过多（%d次）: %w", consecutiveErrors, err)
-			}
-			debugPrint(config, "网络错误，等待2秒后重试...")
-			time.Sleep(2 * time.Second)
-			continue
+			return "", fmt.Errorf("网络请求失败: %w", err)
 		}
 		defer resp.Body.Close()
 
@@ -412,25 +430,13 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 
 		if resp.StatusCode != http.StatusOK {
 			debugPrint(config, "HTTP状态码错误: %d", resp.StatusCode)
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveErrors {
-				return "", fmt.Errorf("连续HTTP错误过多（%d次），状态码: %d", consecutiveErrors, resp.StatusCode)
-			}
-			debugPrint(config, "HTTP错误，等待2秒后重试...")
-			time.Sleep(2 * time.Second)
-			continue
+			return "", fmt.Errorf("HTTP请求失败，状态码: %d", resp.StatusCode)
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			debugPrint(config, "读取响应失败: %v", err)
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveErrors {
-				return "", fmt.Errorf("连续读取错误过多（%d次）: %w", consecutiveErrors, err)
-			}
-			debugPrint(config, "读取错误，等待2秒后重试...")
-			time.Sleep(2 * time.Second)
-			continue
+			return "", fmt.Errorf("读取响应失败: %w", err)
 		}
 
 		debugPrint(config, "响应内容: %s", string(body))
@@ -443,17 +449,8 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 
 		if err := json.Unmarshal(body, &prepareResp); err != nil {
 			debugPrint(config, "JSON解析失败: %v", err)
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveErrors {
-				return "", fmt.Errorf("连续JSON解析错误过多（%d次）: %w", consecutiveErrors, err)
-			}
-			debugPrint(config, "JSON解析错误，等待2秒后重试...")
-			time.Sleep(2 * time.Second)
-			continue
+			return "", fmt.Errorf("JSON解析失败: %w", err)
 		}
-		
-		// 成功收到响应，重置连续错误计数器
-		consecutiveErrors = 0
 		
 		debugPrint(config, "解析结果 - 状态码: %d, 数据: %v, Debug: %v", prepareResp.Status, prepareResp.Data, prepareResp.Debug)
 
@@ -511,28 +508,12 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 					nextSlice := int(nextFloat)
 					debugPrint(config, "上传分片 #%d", nextSlice)
 					
-					// 上传分片（带重试）
-					sliceRetryCount := 0
-					maxSliceRetries := config.MaxRetries
-					for sliceRetryCount < maxSliceRetries {
-						err := uploadSlice(ctx, client, config, filePath, fileName, upToken, nextSlice, progressCallback)
-						if err == nil {
-							debugPrint(config, "分片 #%d 上传完成", nextSlice)
-							break
-						}
-						
-						sliceRetryCount++
-						debugPrint(config, "分片 #%d 上传失败（第%d次重试）: %v", nextSlice, sliceRetryCount, err)
-						
-						if sliceRetryCount >= maxSliceRetries {
-							return "", fmt.Errorf("分片 %d 上传失败，已重试%d次: %w", nextSlice, maxSliceRetries, err)
-						}
-						
-						// 等待后重试
-						waitTime := time.Duration(sliceRetryCount*sliceRetryCount) * time.Second // 指数退避
-						debugPrint(config, "等待 %v 后重试分片 #%d", waitTime, nextSlice)
-						time.Sleep(waitTime)
+					// 上传分片
+					err := uploadSlice(ctx, client, config, filePath, fileName, upToken, nextSlice, progressCallback)
+					if err != nil {
+						return "", fmt.Errorf("分片 %d 上传失败: %w", nextSlice, err)
 					}
+					debugPrint(config, "分片 #%d 上传完成", nextSlice)
 					
 					// 继续下一轮查询
 					continue
@@ -715,10 +696,73 @@ type UploadInfo struct {
 	Server string
 }
 
+// getUTokenOnly 仅获取UToken（GUI模式使用）
+func getUTokenOnly(ctx context.Context, config *Config, sha1Hash, fileName string, fileSize int64) (*UploadInfo, error) {
+	debugPrint(config, "========== 获取UToken API ==========")
+	client := &http.Client{}
+	
+	formData := fmt.Sprintf("action=upload_request_select2&sha1=%s&filename=%s&filesize=%d&model=%d&token=%s",
+		sha1Hash, fileName, fileSize, config.Model, config.Token)
+
+	debugPrint(config, "请求URL: %s", config.Server+"/file")
+	debugPrint(config, "请求方法: POST")
+	debugPrint(config, "Content-Type: application/x-www-form-urlencoded")
+	debugPrint(config, "请求参数: %s", formData)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", config.Server+"/file", strings.NewReader(formData))
+	if err != nil {
+		debugPrint(config, "创建请求失败: %v", err)
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		debugPrint(config, "发送请求失败: %v", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	debugPrint(config, "HTTP状态码: %d", resp.StatusCode)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		debugPrint(config, "读取响应失败: %v", err)
+		return nil, err
+	}
+
+	debugPrint(config, "响应内容: %s", string(body))
+
+	var selectResp struct {
+		Status int `json:"status"`
+		Data   struct {
+			UToken  string      `json:"utoken"`
+			Servers interface{} `json:"servers"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &selectResp); err != nil {
+		debugPrint(config, "JSON解析失败: %v", err)
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	debugPrint(config, "解析结果 - 状态码: %d, UToken: %s", selectResp.Status, selectResp.Data.UToken)
+
+	if selectResp.Status != 1 {
+		debugPrint(config, "API返回错误状态: %d", selectResp.Status)
+		return nil, fmt.Errorf("获取UToken失败，状态码: %d", selectResp.Status)
+	}
+
+	return &UploadInfo{
+		UToken: selectResp.Data.UToken,
+		Server: "", // 在调用方设置
+	}, nil
+}
+
 // getUploadServers 获取上传服务器列表
 func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName string, fileSize int64) (*UploadInfo, error) {
 	debugPrint(config, "========== 获取上传服务器API ==========")
-	client := &http.Client{Timeout: config.Timeout}
+	client := &http.Client{}
 	
 	formData := fmt.Sprintf("action=upload_request_select2&sha1=%s&filename=%s&filesize=%d&model=%d&token=%s",
 		sha1Hash, fileName, fileSize, config.Model, config.Token)
@@ -806,7 +850,7 @@ func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName st
 // checkQuickUpload 检查是否可以秒传
 func checkQuickUpload(ctx context.Context, config *Config, sha1Hash, fileName string, fileSize int64) (string, bool, error) {
 	debugPrint(config, "========== 检查秒传API ==========")
-	client := &http.Client{Timeout: config.Timeout}
+	client := &http.Client{}
 	
 	formData := fmt.Sprintf("action=prepare_v4&sha1=%s&filename=%s&filesize=%d&model=%d&skip_upload=%d&token=%s",
 		sha1Hash, fileName, fileSize, config.Model, config.SkipUpload, config.Token)
@@ -872,88 +916,10 @@ func checkQuickUpload(ctx context.Context, config *Config, sha1Hash, fileName st
 	}
 }
 
-// getUserUID 获取用户UID
-func getUserUID(ctx context.Context, config *Config) (string, error) {
-	debugPrint(config, "========== 获取用户UID API ==========")
-	client := &http.Client{Timeout: config.Timeout}
-	
-	formData := fmt.Sprintf("action=get_detail&token=%s", config.Token)
-	
-	debugPrint(config, "请求URL: %s", config.Server+"/user")
-	debugPrint(config, "请求方法: POST")
-	debugPrint(config, "Content-Type: application/x-www-form-urlencoded")
-	debugPrint(config, "请求参数: %s", formData)
-	
-	req, err := http.NewRequestWithContext(ctx, "POST", config.Server+"/user", strings.NewReader(formData))
-	if err != nil {
-		debugPrint(config, "创建请求失败: %v", err)
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		debugPrint(config, "发送请求失败: %v", err)
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	debugPrint(config, "HTTP状态码: %d", resp.StatusCode)
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		debugPrint(config, "读取响应失败: %v", err)
-		return "", err
-	}
-
-	debugPrint(config, "响应内容: %s", string(body))
-
-	// 首先解析基本响应以检查状态
-	var baseResp struct {
-		Status int         `json:"status"`
-		Data   interface{} `json:"data"`
-		Debug  interface{} `json:"debug"`
-	}
-
-	if err := json.Unmarshal(body, &baseResp); err != nil {
-		debugPrint(config, "JSON解析失败: %v", err)
-		return "", fmt.Errorf("解析用户响应失败: %w", err)
-	}
-
-	debugPrint(config, "解析结果 - 状态码: %d, 数据: %v", baseResp.Status, baseResp.Data)
-
-	if baseResp.Status != 1 {
-		debugPrint(config, "token验证失败，状态码: %d, debug: %v", baseResp.Status, baseResp.Debug)
-		return "", fmt.Errorf("token验证失败，状态码: %d (可能token已过期或无效)", baseResp.Status)
-	}
-
-	// 如果状态为1，再解析具体的用户数据
-	var userResp struct {
-		Status int `json:"status"`
-		Data   struct {
-			UID int64 `json:"uid"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(body, &userResp); err != nil {
-		debugPrint(config, "解析用户数据失败: %v", err)
-		return "", fmt.Errorf("解析用户数据失败: %w", err)
-	}
-
-	if userResp.Data.UID == 0 {
-		debugPrint(config, "UID为0，无效")
-		return "", fmt.Errorf("无法获取用户UID")
-	}
-
-	uid := fmt.Sprintf("%d", userResp.Data.UID)
-	debugPrint(config, "成功获取用户UID: %s", uid)
-	fmt.Fprintf(os.Stderr, "获取到用户UID: %s\n", uid)
-	return uid, nil
-}
 
 // validateTokenAndGetUID 验证token并获取用户UID
-func validateTokenAndGetUID(token, server string, timeout time.Duration) (string, error) {
-	client := &http.Client{Timeout: timeout}
+func validateTokenAndGetUID(token, server string) (string, error) {
+	client := &http.Client{}
 	
 	// 调用/user API验证token并获取用户信息
 	formData := fmt.Sprintf("action=get_detail&token=%s", token)
@@ -1011,7 +977,7 @@ type UploadTokens struct {
 
 // prepareUpload 准备上传
 func prepareUpload(ctx context.Context, config *Config, filePath, sha1Hash string, fileSize int64) (string, bool, *UploadTokens, error) {
-	client := &http.Client{Timeout: config.Timeout}
+	client := &http.Client{}
 
 	// 第一步：upload_request_select2 - 获取上传服务器信息
 	formData := fmt.Sprintf("action=upload_request_select2&sha1=%s&filename=%s&filesize=%d&model=%d&token=%s",
@@ -1087,8 +1053,8 @@ func prepareUpload(ctx context.Context, config *Config, filePath, sha1Hash strin
 		fmt.Fprintf(os.Stderr, "使用API分配的上传服务器: %s\n", uploadServer)
 	}
 
-	// 生成uptoken (按照JS逻辑: SHA1(uid + filename + filesize + slice_size))
-	upTokenData := fmt.Sprintf("%s%s%d%d", config.UID, filepath.Base(filePath), fileSize, config.ChunkSize)
+	// 生成uptoken (基于文件特征: SHA1(sha1 + filename + filesize + slice_size))
+	upTokenData := fmt.Sprintf("%s%s%d%d", sha1Hash, filepath.Base(filePath), fileSize, config.ChunkSize)
 	upTokenHash := sha1.Sum([]byte(upTokenData))
 	upToken := hex.EncodeToString(upTokenHash[:])
 
@@ -1171,7 +1137,7 @@ func uploadChunks(ctx context.Context, config *Config, filePath, sha1Hash string
 	}
 	defer file.Close()
 
-	client := &http.Client{Timeout: config.Timeout}
+	client := &http.Client{}
 	chunkSize := int64(config.ChunkSize)
 	totalChunks := int((fileSize + chunkSize - 1) / chunkSize)
 
@@ -1191,8 +1157,8 @@ func uploadChunks(ctx context.Context, config *Config, filePath, sha1Hash string
 			return "", fmt.Errorf("读取分片 %d 失败: %w", chunkIndex, err)
 		}
 
-		// 上传分片（带重试）
-		err = uploadChunkWithRetry(ctx, client, config, chunkIndex, chunkData, sha1Hash, filepath.Base(filePath), tokens, fileSize)
+		// 上传分片
+		err = uploadChunk(ctx, client, config, chunkIndex, chunkData, sha1Hash, filepath.Base(filePath), tokens, fileSize)
 		if err != nil {
 			return "", fmt.Errorf("上传分片 %d 失败: %w", chunkIndex, err)
 		}
@@ -1225,25 +1191,6 @@ func readChunk(file *os.File, chunkIndex int, chunkSize int64) ([]byte, error) {
 	return buffer[:n], nil
 }
 
-// uploadChunkWithRetry 带重试的分片上传
-func uploadChunkWithRetry(ctx context.Context, client *http.Client, config *Config, chunkIndex int, chunkData []byte, sha1Hash, fileName string, tokens *UploadTokens, fileSize int64) error {
-	var lastErr error
-
-	for retry := 0; retry < config.MaxRetries; retry++ {
-		err := uploadChunk(ctx, client, config, chunkIndex, chunkData, sha1Hash, fileName, tokens, fileSize)
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-
-		if retry < config.MaxRetries-1 {
-			// 等待后重试
-			time.Sleep(time.Duration(retry+1) * time.Second)
-		}
-	}
-
-	return lastErr
-}
 
 // uploadChunk 上传单个分片
 func uploadChunk(ctx context.Context, client *http.Client, config *Config, chunkIndex int, chunkData []byte, sha1Hash, fileName string, tokens *UploadTokens, totalFileSize int64) error {

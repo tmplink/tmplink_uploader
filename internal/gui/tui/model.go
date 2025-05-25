@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/filepicker"
@@ -61,17 +62,13 @@ type Config struct {
 	MaxConcurrent    int    `json:"max_concurrent"`
 	QuickUpload      bool   `json:"quick_upload"`
 	SkipUpload       bool   `json:"skip_upload"`
-	Timeout          int    `json:"timeout"`
 }
 
 // getAvailableServers 从API获取可用的上传服务器列表
 func getAvailableServers(token string) ([]ServerOption, error) {
-	// 始终包含默认选项
-	servers := []ServerOption{
-		{Name: "默认 (自动选择)", URL: "https://tmplink-sec.vxtrans.com/api_v2"},
-	}
+	var servers []ServerOption
 	
-	// 如果没有token，返回默认选项
+	// 如果没有token，返回空列表
 	if token == "" {
 		return servers, nil
 	}
@@ -79,14 +76,12 @@ func getAvailableServers(token string) ([]ServerOption, error) {
 	// 调用API获取服务器列表
 	apiServers, err := fetchServerListFromAPI(token)
 	if err != nil {
-		// 如果API调用失败，返回默认选项和错误
+		// 如果API调用失败，返回空列表和错误
 		return servers, err
 	}
 	
-	// 添加从API获取的服务器
-	servers = append(servers, apiServers...)
-	
-	return servers, nil
+	// 直接使用从API获取的服务器列表
+	return apiServers, nil
 }
 
 // fetchServerListFromAPI 从API获取服务器列表
@@ -156,13 +151,12 @@ func fetchServerListFromAPI(token string) ([]ServerOption, error) {
 func defaultConfig() Config {
 	return Config{
 		Token:              "",
-		UploadServer:       "https://tmplink-sec.vxtrans.com/api_v2",
-		SelectedServerName: "默认服务器",
+		UploadServer:       "",
+		SelectedServerName: "",
 		ChunkSize:          3 * 1024 * 1024, // 3MB
 		MaxConcurrent:      5,
 		QuickUpload:        true,
 		SkipUpload:         false,
-		Timeout:            300, // 5分钟
 	}
 }
 
@@ -175,6 +169,8 @@ type TaskStatus struct {
 	FileSize    int64     `json:"file_size"`
 	Progress    float64   `json:"progress"`
 	UploadSpeed float64   `json:"upload_speed,omitempty"` // KB/s
+	ServerName  string    `json:"server_name,omitempty"`  // 上传服务器名称
+	ProcessID   int       `json:"process_id,omitempty"`   // CLI进程号
 	DownloadURL string    `json:"download_url,omitempty"`
 	ErrorMsg    string    `json:"error_msg,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -291,10 +287,11 @@ func NewModel(cliPath string) Model {
 	
 	// 初始化上传任务表格
 	columns := []table.Column{
-		{Title: "文件名", Width: 30},
+		{Title: "文件名", Width: 25},
 		{Title: "大小", Width: 10},
 		{Title: "进度", Width: 10},
 		{Title: "速度", Width: 10},
+		{Title: "服务器", Width: 12},
 		{Title: "状态", Width: 10},
 	}
 	
@@ -314,6 +311,24 @@ func NewModel(cliPath string) Model {
 		currentDir, _ = os.UserHomeDir()
 	}
 	
+	// 清理无效状态文件并加载有效任务
+	var uploadTasks []TaskStatus
+	var statusFiles map[string]string
+	if config.Token != "" {
+		validTasks, validStatusFiles, err := cleanupAndLoadTasks()
+		if err == nil {
+			uploadTasks = validTasks
+			statusFiles = validStatusFiles
+		} else {
+			// 如果清理失败，使用空的任务列表
+			uploadTasks = make([]TaskStatus, 0)
+			statusFiles = make(map[string]string)
+		}
+	} else {
+		uploadTasks = make([]TaskStatus, 0)
+		statusFiles = make(map[string]string)
+	}
+	
 	// 初始化设置输入框
 	settingsInputs := make(map[string]textinput.Model)
 	
@@ -329,24 +344,20 @@ func NewModel(cliPath string) Model {
 	concurrencyInput.SetValue(fmt.Sprintf("%d", config.MaxConcurrent))
 	settingsInputs["concurrency"] = concurrencyInput
 	
-	timeoutInput := textinput.New()
-	timeoutInput.Placeholder = "超时时间(秒)"
-	timeoutInput.Width = 20
-	timeoutInput.SetValue(fmt.Sprintf("%d", config.Timeout))
-	settingsInputs["timeout"] = timeoutInput
-	
 	// 默认设置焦点（在用户验证前假设非赞助用户）
-	timeoutInput.Focus() // 默认聚焦timeout，这是所有用户都可编辑的设置
-	initialSettingsIndex := 2 // timeout是第三个（索引2）
+	// 没有所有用户都可编辑的设置，所以先不设置焦点
+	initialSettingsIndex := 0
 	
-	// 初始化服务器列表和索引（在没有token时先使用默认列表）
-	availableServers, _ := getAvailableServers("") // 空token，只返回默认选项
+	// 初始化服务器列表和索引（在没有token时为空列表）
+	availableServers, _ := getAvailableServers("") // 空token，返回空列表
 	serverIndex := 0
-	// 根据配置的服务器URL或名称找到对应的索引
-	for i, server := range availableServers {
-		if server.URL == config.UploadServer || server.Name == config.SelectedServerName {
-			serverIndex = i
-			break
+	// 如果有配置的服务器，根据配置的服务器URL或名称找到对应的索引
+	if config.SelectedServerName != "" {
+		for i, server := range availableServers {
+			if server.URL == config.UploadServer || server.Name == config.SelectedServerName {
+				serverIndex = i
+				break
+			}
 		}
 	}
 
@@ -369,8 +380,8 @@ func NewModel(cliPath string) Model {
 		settingsInputs:   settingsInputs,
 		serverIndex:      serverIndex,
 		availableServers: availableServers,
-		uploadTasks:      make([]TaskStatus, 0),
-		statusFiles:      make(map[string]string),
+		uploadTasks:      uploadTasks,
+		statusFiles:      statusFiles,
 		isLoading:        config.Token != "",
 	}
 }
@@ -390,6 +401,13 @@ func (m Model) Init() tea.Cmd {
 	
 	// 加载文件列表
 	cmds = append(cmds, m.loadFiles())
+	
+	// 为恢复的上传任务启动进度监控
+	for _, task := range m.uploadTasks {
+		if task.Status == "uploading" || task.Status == "pending" {
+			cmds = append(cmds, m.checkProgress(task.ID))
+		}
+	}
 	
 	return tea.Batch(cmds...)
 }
@@ -414,28 +432,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 用户验证成功后，从API获取最新的服务器列表
 		if updatedServers, err := getAvailableServers(m.config.Token); err == nil {
 			m.availableServers = updatedServers
-			// 重新设置serverIndex
-			for i, server := range m.availableServers {
-				if server.URL == m.config.UploadServer || server.Name == m.config.SelectedServerName {
-					m.serverIndex = i
-					break
+			
+			// 如果没有配置的服务器，默认选择第一个可用服务器
+			if m.config.SelectedServerName == "" && len(m.availableServers) > 0 {
+				m.serverIndex = 0
+				m.config.SelectedServerName = m.availableServers[0].Name
+				m.config.UploadServer = m.availableServers[0].URL
+			} else {
+				// 根据配置查找对应的服务器索引
+				found := false
+				for i, server := range m.availableServers {
+					if server.URL == m.config.UploadServer || server.Name == m.config.SelectedServerName {
+						m.serverIndex = i
+						// 更新配置以确保同步
+						m.config.SelectedServerName = server.Name
+						m.config.UploadServer = server.URL
+						found = true
+						break
+					}
+				}
+				// 如果配置的服务器不在可用列表中，默认选择第一个
+				if !found && len(m.availableServers) > 0 {
+					m.serverIndex = 0
+					m.config.SelectedServerName = m.availableServers[0].Name
+					m.config.UploadServer = m.availableServers[0].URL
 				}
 			}
 		}
 		
-		// 如果是赞助用户，重新设置设置界面的焦点和索引
+		// 如果是赞助用户，设置设置界面的焦点和索引
 		if m.userInfo.IsSponsored {
-			// 失去timeout的焦点
-			if timeoutInput, exists := m.settingsInputs["timeout"]; exists {
-				timeoutInput.Blur()
-				m.settingsInputs["timeout"] = timeoutInput
-			}
-			
-			// 设置chunk_size获得焦点，并重置选中索引
+			// 设置chunk_size获得焦点
 			if chunkSizeInput, exists := m.settingsInputs["chunk_size"]; exists {
 				chunkSizeInput.Focus()
 				m.settingsInputs["chunk_size"] = chunkSizeInput
-				m.settingsIndex = 0 // 重置为第一个设置项
+				m.settingsIndex = 0 // 设置为第一个设置项
 			}
 		}
 		
@@ -563,14 +594,11 @@ func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSettings 处理设置界面输入
 func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// 基础设置项
-	basicSettings := []string{"chunk_size", "concurrency", "timeout"}
 	// 赞助者设置项
-	sponsorSettings := []string{"server", "quick_upload"}
+	sponsorSettings := []string{"chunk_size", "concurrency", "server", "quick_upload"}
 	
 	// 根据用户类型确定可用设置
 	var settingsKeys []string
-	settingsKeys = append(settingsKeys, basicSettings...)
 	if m.userInfo.IsSponsored {
 		settingsKeys = append(settingsKeys, sponsorSettings...)
 	}
@@ -840,15 +868,23 @@ func (m Model) startFileUpload(filePath string) (tea.Model, tea.Cmd) {
 
 	// 立即创建任务状态并添加到任务列表
 	fileInfo, _ := os.Stat(filePath)
+	
+	// 获取当前选中的服务器名称
+	selectedServerName := "未知"
+	if m.serverIndex < len(m.availableServers) && len(m.availableServers) > 0 {
+		selectedServerName = m.availableServers[m.serverIndex].Name
+	}
+	
 	task := TaskStatus{
-		ID:        taskID,
-		Status:    "starting",
-		FilePath:  filePath,
-		FileName:  filepath.Base(filePath),
-		FileSize:  fileInfo.Size(),
-		Progress:  0.0,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:         taskID,
+		Status:     "starting",
+		FilePath:   filePath,
+		FileName:   filepath.Base(filePath),
+		FileSize:   fileInfo.Size(),
+		Progress:   0.0,
+		ServerName: selectedServerName, // 设置服务器名称
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 	
 	// 添加到任务列表
@@ -905,11 +941,18 @@ func (m *Model) updateUploadTable() {
 			}
 		}
 		
+		// 服务器名称显示
+		serverStr := task.ServerName
+		if serverStr == "" {
+			serverStr = "未知"
+		}
+		
 		row := table.Row{
 			task.FileName,
 			sizeStr,
 			progressStr,
 			speedStr,
+			serverStr,
 			statusStr,
 		}
 		rows = append(rows, row)
@@ -1070,6 +1113,94 @@ func (m Model) renderStatusBar() string {
 	return strings.Join(lines, "\n")
 }
 
+// cleanupAndLoadTasks 清理无效状态文件并加载有效任务
+func cleanupAndLoadTasks() ([]TaskStatus, map[string]string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	tasksDir := filepath.Join(homeDir, ".tmplink", "tasks")
+	statusFiles := make(map[string]string)
+	var validTasks []TaskStatus
+	
+	// 检查任务目录是否存在
+	if _, err := os.Stat(tasksDir); os.IsNotExist(err) {
+		return validTasks, statusFiles, nil
+	}
+	
+	// 读取所有状态文件
+	files, err := os.ReadDir(tasksDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+		
+		statusFile := filepath.Join(tasksDir, file.Name())
+		
+		// 读取状态文件
+		data, err := os.ReadFile(statusFile)
+		if err != nil {
+			// 无法读取的文件直接删除
+			os.Remove(statusFile)
+			continue
+		}
+		
+		var task TaskStatus
+		if err := json.Unmarshal(data, &task); err != nil {
+			// 无法解析的文件直接删除
+			os.Remove(statusFile)
+			continue
+		}
+		
+		// 检查任务状态
+		shouldKeep := false
+		
+		if task.Status == "completed" || task.Status == "failed" {
+			// 已完成或失败的任务保留（但不加入监控）
+			shouldKeep = true
+		} else if task.ProcessID > 0 {
+			// 检查进程是否还在运行
+			if isProcessRunning(task.ProcessID) {
+				// 进程仍在运行，加入监控列表
+				shouldKeep = true
+				validTasks = append(validTasks, task)
+				statusFiles[task.ID] = statusFile
+			}
+		}
+		
+		if !shouldKeep {
+			// 删除无效的状态文件
+			os.Remove(statusFile)
+			// 同时删除对应的日志文件
+			os.Remove(statusFile + ".log")
+		}
+	}
+	
+	return validTasks, statusFiles, nil
+}
+
+// isProcessRunning 检查进程是否正在运行
+func isProcessRunning(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	
+	// 在Unix系统上，发送信号0可以检查进程是否存在
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	
+	// 发送信号0检查进程是否存在（在Unix系统上）
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
 // renderContent 渲染主要内容区域
 func (m Model) renderContent() string {
 	switch m.state {
@@ -1190,15 +1321,15 @@ func (m Model) renderSettings() string {
 		s.WriteString("⚠️  部分设置需要赞助者权限\n\n")
 	}
 	
-	settingsKeys := []string{"chunk_size", "concurrency", "timeout"}
-	settingsLabels := []string{"分块大小 (MB):", "并发数:", "超时时间 (秒):"}
-	settingsSponsored := []bool{true, true, false} // 分块大小和并发数需要赞助者权限
+	// 只有赞助者可以访问设置
+	var settingsKeys []string
+	var settingsLabels []string
+	var settingsSponsored []bool
 	
-	// 添加赞助者专用设置
 	if m.userInfo.IsSponsored {
-		settingsKeys = append(settingsKeys, "server", "quick_upload")
-		settingsLabels = append(settingsLabels, "上传服务器:", "快速上传:")
-		settingsSponsored = append(settingsSponsored, true, true)
+		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload"}
+		settingsLabels = []string{"分块大小 (MB):", "并发数:", "上传服务器:", "快速上传:"}
+		settingsSponsored = []bool{true, true, true, true}
 	}
 	
 	for i, key := range settingsKeys {
@@ -1220,8 +1351,8 @@ func (m Model) renderSettings() string {
 		if key == "server" && m.userInfo.IsSponsored {
 			// 显示服务器选择
 			currentServer := "默认"
-			if m.config.SelectedServerName != "" {
-				currentServer = m.config.SelectedServerName
+			if m.serverIndex < len(m.availableServers) && len(m.availableServers) > 0 {
+				currentServer = m.availableServers[m.serverIndex].Name
 			}
 			line = fmt.Sprintf("%s%s\n%s  %s (←/→ 切换)", prefix, label, strings.Repeat(" ", len(prefix)), currentServer)
 		} else if key == "quick_upload" && m.userInfo.IsSponsored {
@@ -1239,8 +1370,6 @@ func (m Model) renderSettings() string {
 				value = fmt.Sprintf("%d", m.config.ChunkSize/(1024*1024))
 			case "concurrency":
 				value = fmt.Sprintf("%d", m.config.MaxConcurrent)
-			case "timeout":
-				value = fmt.Sprintf("%d", m.config.Timeout)
 			}
 			line = fmt.Sprintf("%s%s\n%s  %s (只读)", prefix, label, strings.Repeat(" ", len(prefix)), value)
 		} else {
@@ -1307,6 +1436,15 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 			skipUpload = "0"
 		}
 		
+		// 获取当前选中的服务器信息
+		selectedServerName := "未知"
+		selectedServerURL := ""
+		if m.serverIndex < len(m.availableServers) && len(m.availableServers) > 0 {
+			selectedServer := m.availableServers[m.serverIndex]
+			selectedServerName = selectedServer.Name
+			selectedServerURL = selectedServer.URL
+		}
+		
 		// 构建CLI命令参数
 		args := []string{
 			"-file", filePath,
@@ -1315,16 +1453,15 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 			"-status-file", statusFile,
 			"-api-server", apiServer,
 			"-chunk-size", fmt.Sprintf("%d", m.config.ChunkSize),
-			"-timeout", fmt.Sprintf("%d", m.config.Timeout),
-			"-max-retries", "3",
 			"-model", "1",
 			"-mr-id", "0",
 			"-skip-upload", skipUpload,
+			"-server-name", selectedServerName,
 		}
 		
-		// 如果用户选择了特定的上传服务器，添加upload-server参数
-		if m.config.SelectedServerName != "默认 (自动选择)" && m.config.UploadServer != "" && m.config.UploadServer != "https://tmplink-sec.vxtrans.com/api_v2" {
-			args = append(args, "-upload-server", m.config.UploadServer)
+		// GUI模式下始终传递选中的上传服务器地址
+		if selectedServerURL != "" {
+			args = append(args, "-upload-server", selectedServerURL)
 		}
 		
 		cmd := exec.Command(m.cliPath, args...)
@@ -1347,7 +1484,7 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 			cmd.Wait() // 等待进程完成
 		}()
 		
-		// 开始监控进度
+		// 立即开始监控进度，checkProgress中会处理状态文件不存在的情况
 		return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
 	}
 }
@@ -1533,12 +1670,12 @@ func loadConfig() Config {
 		return defaultConfig()
 	}
 	
-	// 填充缺失的默认值
-	if config.Timeout == 0 {
-		config.Timeout = 300
+	// 清理旧的默认配置
+	if config.UploadServer == "https://tmplink-sec.vxtrans.com/api_v2" {
+		config.UploadServer = ""
 	}
-	if config.UploadServer == "" {
-		config.UploadServer = "https://tmplink-sec.vxtrans.com/api_v2"
+	if config.SelectedServerName == "默认 (自动选择)" || config.SelectedServerName == "默认服务器" {
+		config.SelectedServerName = ""
 	}
 	
 	return config
@@ -1743,13 +1880,13 @@ func loadDirectoryFiles(dirPath string, showHidden bool) ([]FileInfo, error) {
 
 // saveSettings 保存设置
 func (m Model) saveSettings() (tea.Model, tea.Cmd) {
-	settingsKeys := []string{"chunk_size", "concurrency", "timeout"}
-	settingsSponsored := []bool{true, true, false}
+	// 只有赞助者可以修改设置
+	var settingsKeys []string
+	var settingsSponsored []bool
 	
-	// 添加赞助者专用设置
 	if m.userInfo.IsSponsored {
-		settingsKeys = append(settingsKeys, "server", "quick_upload")
-		settingsSponsored = append(settingsSponsored, true, true)
+		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload"}
+		settingsSponsored = []bool{true, true, true, true}
 	}
 	
 	// 解析和验证输入值
@@ -1803,13 +1940,6 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.config.MaxConcurrent = intValue
-		case "timeout":
-			if intValue < 30 || intValue > 3600 {
-				m.err = fmt.Errorf("超时时间必须在 30-3600 秒之间")
-				m.state = StateError
-				return m, nil
-			}
-			m.config.Timeout = intValue
 		}
 	}
 	

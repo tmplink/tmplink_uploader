@@ -143,7 +143,6 @@ make release   # 构建所有平台发布版本
 -api-server URL           # API服务器地址（默认: https://tmplink-sec.vxtrans.com/api_v2）
 -upload-server URL        # 强制指定上传服务器地址（可选，覆盖API服务器选择）
 -chunk-size 3145728       # 分片大小(字节)，默认3MB
--max-retries 3            # 最大重试次数
 -timeout 300              # 超时时间(秒)
 -model 0                  # 文件有效期：0=24小时，1=3天，2=7天，99=永久
 -mr-id "0"                # 资源ID（默认"0"为根目录）
@@ -270,33 +269,9 @@ while true; do
 done
 ```
 
-### 错误处理和重试
+### 错误处理
 
-#### 自动重试脚本
-```bash
-#!/bin/bash
-MAX_ATTEMPTS=3
-ATTEMPT=1
-
-while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-  echo "尝试第 $ATTEMPT 次上传..."
-  
-  ./tmplink-cli \
-    -file "$1" \
-    -token "$2" \
-    -task-id "retry_$ATTEMPT" \
-    -status-file "status_retry.json"
-  
-  if [ $? -eq 0 ]; then
-    echo "上传成功!"
-    break
-  else
-    echo "上传失败，$(($MAX_ATTEMPTS - $ATTEMPT)) 次重试机会剩余"
-    ATTEMPT=$((ATTEMPT + 1))
-    sleep 5
-  fi
-done
-```
+CLI程序采用快速失败策略，遇到错误立即退出并返回详细错误信息。如需重试，请使用外部脚本或重新执行命令。
 
 ## 配置文件
 
