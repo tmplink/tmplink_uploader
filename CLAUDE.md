@@ -122,8 +122,12 @@ The tmplink-cli process accepts the following command-line parameters:
 - `-chunk-size`: Chunk size in bytes (default: 3MB, max: 80MB)
 - `-max-retries`: Maximum retry attempts (default: 3)
 - `-timeout`: Request timeout in seconds (default: 300)
-- `-model`: Upload model (default: 1, normal upload)
-- `-mr-id`: Resource ID (optional, for specific upload contexts)
+- `-model`: File expiration period (default: 0, 24 hours)
+  - `0`: 24 hours (default)
+  - `1`: 3 days
+  - `2`: 7 days  
+  - `99`: Permanent (no expiration)
+- `-mr-id`: Resource ID (default: "0" for root directory, for specific upload contexts)
 - `-skip-upload`: Skip upload flag (default: 1, enables instant upload check)
 - `-uid`: User ID (optional, auto-obtained from token validation if not provided)
 
@@ -139,8 +143,8 @@ The CLI generates API calls with the following complete parameter set for upload
 6. `filesize` - Total file size in bytes
 7. `slice_size` - Chunk size in bytes
 8. `utoken` - Server-provided upload token from upload_request_select2
-9. `mr_id` - Resource ID (empty string if not provided)
-10. `model` - Upload model (1 = normal upload)
+9. `mr_id` - Resource ID (default "0" for root directory)
+10. `model` - File expiration period (0 = 24 hours, 1 = 3 days, 2 = 7 days, 99 = permanent)
 
 **Internal Parameter Processing:**
 
@@ -160,8 +164,13 @@ The CLI automatically handles the following internally:
 
 **Note:** 
 - `captcha` parameter is NOT used as TmpLink API does not require captcha verification
-- `mr-id` parameter is always included in API calls, even if empty
+- `mr-id` parameter defaults to "0" (root directory) and is always included in API calls
 - Users don't need to know internal API details like utoken/uptoken generation
+
+**Critical Bug Fix (2024-12-31):**
+- Fixed mr_id parameter default value from empty string "" to "0"
+- Empty mr_id caused status 7(data=8) "folder not found" errors
+- Proper mr_id="0" now returns status 8 with successful merge completion
 
 ## Development Commands
 
@@ -222,8 +231,9 @@ The `prepare_v4` API has flexible response structure:
 - Status 1: Upload completed successfully
 - Status 2: Waiting for other chunks  
 - Status 3: Ready to upload next chunk
-- Status 6/8: File already exists (instant upload)
-- Status 7: Upload failed with error details
+- Status 6: File already exists (instant upload)
+- Status 7: Upload error - data field contains error code (e.g., data=8 means "folder not found")
+- Status 8: Upload merge completed successfully (normal completion after chunked upload)
 
 ### File Preparation
 - SHA1 calculation for deduplication
@@ -236,3 +246,17 @@ The Go client handles dynamic API responses:
 - `PrepareResponse.Data` uses `interface{}` to handle both object and boolean values
 - Type assertion is used to safely extract specific fields
 - Fallback logic ensures robust error handling for unexpected response formats
+
+## Testing and Validation
+
+### Test Environment
+- Test files organized in `test/` directory
+- Sample configuration files for development
+- Upload test logs and status files
+- Test data includes 10MB files with 1MB chunk testing
+
+### Known Test Results
+- **10MB file with 1MB chunks**: Successfully uploads with status 8 completion
+- **mr_id parameter testing**: Confirmed "0" default prevents folder lookup errors
+- **Status code validation**: Status 7(data=8) correctly identified as error, status 8 as success
+- **API endpoint compatibility**: All endpoints tested with proper form POST requests

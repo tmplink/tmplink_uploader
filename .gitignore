@@ -29,3 +29,5 @@ go.sum.backup
 
 # 测试数据
 test_*.txt
+test/
+reference/
