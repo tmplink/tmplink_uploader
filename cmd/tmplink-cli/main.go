@@ -145,7 +145,7 @@ func main() {
 		apiServer    = flag.String("api-server", "https://tmplink-sec.vxtrans.com/api_v2", "API服务器地址")
 		uploadServer = flag.String("upload-server", "", "强制指定上传服务器地址 (可选，留空自动选择)")
 		serverName   = flag.String("server-name", "", "上传服务器名称 (用于显示)")
-		chunkSize    = flag.Int("chunk-size", 3*1024*1024, "分块大小(字节)")
+		chunkSizeMB  = flag.Int("chunk-size", 3, "分块大小(MB, 1-99)")
 		statusFile   = flag.String("status-file", "", "任务状态文件路径 (必需)")
 		taskID       = flag.String("task-id", "", "任务ID (必需)")
 		model        = flag.Int("model", 0, "文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)")
@@ -162,6 +162,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 验证分块大小
+	if *chunkSizeMB < 1 || *chunkSizeMB > 99 {
+		fmt.Fprintf(os.Stderr, "错误: 分块大小必须在1-99MB之间，当前值: %dMB\n", *chunkSizeMB)
+		os.Exit(1)
+	}
+
 	// 验证文件存在
 	if _, err := os.Stat(*filePath); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "错误: 文件不存在: %s\n", *filePath)
@@ -172,6 +178,14 @@ func main() {
 	fileInfo, err := os.Stat(*filePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "错误: 获取文件信息失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 验证文件大小限制 (50GB)
+	const maxFileSize = 50 * 1024 * 1024 * 1024 // 50GB
+	if fileInfo.Size() > maxFileSize {
+		fmt.Fprintf(os.Stderr, "错误: 文件大小超出限制，最大支持50GB，当前文件: %.2fGB\n", 
+			float64(fileInfo.Size())/(1024*1024*1024))
 		os.Exit(1)
 	}
 
@@ -195,12 +209,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 转换分块大小从MB到字节
+	chunkSizeBytes := *chunkSizeMB * 1024 * 1024
+	
 	// 创建上传配置
 	config := &Config{
 		Token:        *token,
 		Server:       *apiServer,
 		UploadServer: *uploadServer, // 用户指定的上传服务器
-		ChunkSize:    *chunkSize,
+		ChunkSize:    chunkSizeBytes,
 		Model:        *model,
 		MrID:         *mrID,
 		SkipUpload:   *skipUpload,
@@ -209,7 +226,7 @@ func main() {
 	
 	debugPrint(config, "启动CLI上传程序")
 	debugPrint(config, "文件路径: %s", *filePath)
-	debugPrint(config, "分片大小: %d bytes (%.1f MB)", *chunkSize, float64(*chunkSize)/(1024*1024))
+	debugPrint(config, "分片大小: %d bytes (%dMB)", chunkSizeBytes, *chunkSizeMB)
 	debugPrint(config, "API服务器: %s", *apiServer)
 
 	// 创建速度计算器

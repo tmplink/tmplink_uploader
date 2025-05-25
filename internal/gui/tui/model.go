@@ -759,6 +759,23 @@ func (m Model) handleFileSelection() (tea.Model, tea.Cmd) {
 	} else {
 		// 选择文件进行上传
 		filePath := filepath.Join(m.currentDir, selectedFile.Name)
+		
+		// 验证文件大小限制 (50GB)
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			m.err = fmt.Errorf("无法获取文件信息: %v", err)
+			m.state = StateError
+			return m, nil
+		}
+		
+		const maxFileSize = 50 * 1024 * 1024 * 1024 // 50GB
+		if fileInfo.Size() > maxFileSize {
+			m.err = fmt.Errorf("文件大小超出限制，最大支持50GB，当前文件: %.2fGB", 
+				float64(fileInfo.Size())/(1024*1024*1024))
+			m.state = StateError
+			return m, nil
+		}
+		
 		return m.startFileUpload(filePath)
 	}
 }
@@ -1927,8 +1944,8 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 		// 验证范围并应用设置
 		switch key {
 		case "chunk_size":
-			if intValue < 1 || intValue > 80 {
-				m.err = fmt.Errorf("分块大小必须在 1-80 MB 之间")
+			if intValue < 1 || intValue > 99 {
+				m.err = fmt.Errorf("分块大小必须在 1-99 MB 之间")
 				m.state = StateError
 				return m, nil
 			}
