@@ -156,12 +156,6 @@ sudo yum install glibc      # CentOS/RHEL
 - **API文档**: [docs/api.md](../docs/api.md)
 - **设计文档**: [docs/design.md](../docs/design.md)
 
-## 更新日志
-
-### v1.0.1 (2024-12-31)
-- 🐛 修复mr_id参数bug
-- ✅ 完善API状态码处理
-- 📦 提供预编译版本
 
 ---
 
