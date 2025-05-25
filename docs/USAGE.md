@@ -1,4 +1,4 @@
-# TmpLink Uploader 使用指南
+# 钛盘上传工具使用指南
 
 本文档提供详细的使用说明，包括安装、配置和操作指引。
 
@@ -19,7 +19,7 @@ make build
 ### 基本使用
 
 #### 1. 获取 API Token
-1. 访问 [TmpLink](https://tmp.link/) 并登录
+1. 访问 [钛盘](https://tmp.link/) 并登录
 2. 打开浏览器开发者工具 (F12)
 3. 在控制台执行: `localStorage.getItem('token')`
 4. 复制返回的 token 值
@@ -65,7 +65,7 @@ make build
 ### 配置参数
 
 #### Token 设置
-- **必需**: TmpLink API 访问令牌
+- **必需**: 钛盘 API 访问令牌
 - **获取方式**: 从浏览器 localStorage 获取
 - **注意**: Token 会加密保存到配置文件
 

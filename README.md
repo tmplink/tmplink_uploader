@@ -1,6 +1,6 @@
-# TmpLink 文件上传工具
+# 钛盘文件上传工具
 
-一个用于 [钛盘 (TmpLink)](https://tmp.link/) 的命令行文件上传工具，采用双进程架构设计。
+一个用于 [钛盘](https://tmp.link/) 的命令行文件上传工具，采用双进程架构设计。
 
 ## 项目概述
 
@@ -66,7 +66,7 @@ make build-gui    # 构建GUI程序
 | 参数 | 说明 |
 |------|------|
 | `-file` | 要上传的文件路径 |
-| `-token` | TmpLink API Token |
+| `-token` | 钛盘 API Token |
 | `-task-id` | 唯一任务ID |
 | `-status-file` | 状态文件保存路径 |
 
@@ -101,7 +101,7 @@ make build-gui    # 构建GUI程序
 
 ## Token 获取
 
-1. 访问 https://tmp.link/ 并登录
+1. 访问 [钛盘](https://tmp.link/) 并登录
 2. 打开浏览器开发者工具 (F12)
 3. 在 Console 中执行: `localStorage.getItem('token')`
 4. 复制返回的 token 值
@@ -130,7 +130,7 @@ make clean        # 清理构建产物
 
 1. **Token 无效**
    - 检查 token 是否正确复制
-   - 确认 TmpLink 账户未过期
+   - 确认钛盘账户未过期
    - 重新获取 token
 
 2. **上传失败**
@@ -185,5 +185,5 @@ cat status.json
 ## 文档
 
 - [设计文档](docs/design.md) - 系统架构和设计理念
-- [API文档](docs/api.md) - TmpLink API集成规范
+- [API文档](docs/api.md) - 钛盘 API集成规范
 - [使用说明](docs/usage.md) - 详细使用指南

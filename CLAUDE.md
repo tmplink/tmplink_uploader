@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a dual-process uploader tool for [钛盘 (TmpLink)](https://tmp.link/), written in Go. The project consists of a GUI process and independent CLI processes that handle individual file uploads with inter-process communication via JSON status files.
+This is a dual-process uploader tool for [钛盘](https://tmp.link/), written in Go. The project consists of a GUI process and independent CLI processes that handle individual file uploads with inter-process communication via JSON status files.
 
 ## Architecture
 
@@ -41,7 +41,7 @@ This is a dual-process uploader tool for [钛盘 (TmpLink)](https://tmp.link/), 
 
 ### API Integration
 
-The codebase integrates with TmpLink's REST API endpoints:
+The codebase integrates with 钛盘's REST API endpoints:
 - Base URL: `https://tmplink-sec.vxtrans.com/api_v2`
 - Token-based authentication: Users obtain token from web browser session
 - Request format: `application/x-www-form-urlencoded` (form POST) as required by server
@@ -113,7 +113,7 @@ The tmplink-cli process accepts the following command-line parameters:
 
 **Required Parameters (Minimal Set):**
 - `-file`: Path to the file to upload
-- `-token`: TmpLink API token  
+- `-token`: 钛盘 API token  
 - `-task-id`: Unique task identifier
 - `-status-file`: Path to JSON status file for progress communication
 
@@ -135,7 +135,7 @@ The tmplink-cli process accepts the following command-line parameters:
 
 The CLI generates API calls with the following complete parameter set for upload operations:
 
-1. `token` - TmpLink API token
+1. `token` - 钛盘 API token
 2. `uptoken` - Client-generated SHA1(uid + filename + filesize + chunk_size)  
 3. `action` - API action ("prepare" for chunk queries, "upload_slice" for data upload)
 4. `sha1` - File SHA1 hash for deduplication
@@ -163,7 +163,7 @@ The CLI automatically handles the following internally:
 - **No config files**: All settings passed via command line for process independence
 
 **Note:** 
-- `captcha` parameter is NOT used as TmpLink API does not require captcha verification
+- `captcha` parameter is NOT used as 钛盘 API does not require captcha verification
 - `mr-id` parameter defaults to "0" (root directory) and is always included in API calls
 - Users don't need to know internal API details like utoken/uptoken generation
 
