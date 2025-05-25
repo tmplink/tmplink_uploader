@@ -175,9 +175,10 @@ The CLI automatically handles the following internally:
 ## Development Commands
 
 ### Build and Run
-- `make build` - Build the binary
+- `make build` - Build for current platform
+- `make release` - Build for all platforms (Linux, Windows, macOS)
 - `make run` - Run directly with go run
-- `make build-all` - Build for all platforms (Linux, Windows, macOS)
+- `make dist` - Create distribution packages
 
 ### Development
 - `make deps` - Install dependencies

@@ -13,8 +13,11 @@
 ### 构建程序
 
 ```bash
-# 构建所有程序
+# 构建当前平台版本
 make build
+
+# 构建所有平台发布版本
+make release
 
 # 或分别构建
 make build-cli    # 构建CLI程序
@@ -110,9 +113,10 @@ make build-gui    # 构建GUI程序
 
 ### 构建和运行
 ```bash
-make build        # 构建二进制文件
+make build        # 构建当前平台版本
+make release      # 构建所有平台发布版本
 make run          # 直接运行
-make build-all    # 跨平台构建
+make dist         # 创建发布包
 ```
 
 ### 开发工具

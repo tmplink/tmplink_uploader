@@ -7,17 +7,21 @@ GUI_SOURCE = ./cmd/tmplink
 GO_VERSION = $(shell go version | awk '{print $$3}')
 BUILD_TIME = $(shell date +"%Y-%m-%d %H:%M:%S")
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
+BUILD_DIR = ./build
 
 # 构建标记
 LDFLAGS = -ldflags "-X main.Version=$(GIT_COMMIT) -X 'main.BuildTime=$(BUILD_TIME)'"
 
-.PHONY: all build clean test run help deps lint vet fmt check install build-all
+.PHONY: all build clean test run help deps lint vet fmt check install build-all build-release release
 
 # 默认目标
 all: build
 
-# 构建所有可执行文件
+# 构建当前平台版本
 build: build-cli build-gui
+
+# 构建所有平台发布版本
+release: build-release
 
 # 构建CLI程序
 build-cli:
@@ -28,6 +32,44 @@ build-cli:
 build-gui:
 	@echo "构建GUI程序..."
 	go build $(LDFLAGS) -o $(BINARY_DIR)$(GUI_BINARY) $(GUI_SOURCE)
+
+# 构建所有平台发布版本
+build-release: clean-build
+	@echo "构建所有平台发布版本..."
+	@mkdir -p $(BUILD_DIR)/{macos-intel,macos-arm64,windows-64bit,windows-32bit,linux-64bit,linux-32bit,linux-arm64}
+	
+	@echo "构建 macOS Intel..."
+	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(CLI_BINARY) $(CLI_SOURCE)
+	
+	@echo "构建 macOS ARM64..."
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(CLI_BINARY) $(CLI_SOURCE)
+	
+	@echo "构建 Windows 64位..."
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(GUI_BINARY).exe $(GUI_SOURCE)
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(CLI_BINARY).exe $(CLI_SOURCE)
+	
+	@echo "构建 Windows 32位..."
+	GOOS=windows GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(GUI_BINARY).exe $(GUI_SOURCE)
+	GOOS=windows GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(CLI_BINARY).exe $(CLI_SOURCE)
+	
+	@echo "构建 Linux 64位..."
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(CLI_BINARY) $(CLI_SOURCE)
+	
+	@echo "构建 Linux 32位..."
+	GOOS=linux GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=linux GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(CLI_BINARY) $(CLI_SOURCE)
+	
+	@echo "构建 Linux ARM64..."
+	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(CLI_BINARY) $(CLI_SOURCE)
+	
+	@echo "所有平台构建完成！"
+
+# 兼容旧的build-all命令
+build-all: build-release
 
 # 安装依赖
 deps:
@@ -52,7 +94,7 @@ run-cli: build-cli
 	@echo "运行CLI程序..."
 	./$(CLI_BINARY) -h
 
-# 运行GUI程序
+# 运行GUI程序  
 run-gui: build-gui
 	@echo "运行GUI程序..."
 	./$(GUI_BINARY)
@@ -86,7 +128,7 @@ check: fmt vet lint test
 
 # 清理构建文件
 clean:
-	@echo "清理构建文件..."
+	@echo "清理本地构建文件..."
 	rm -f $(CLI_BINARY)
 	rm -f $(GUI_BINARY)
 	rm -f coverage.out
@@ -94,6 +136,12 @@ clean:
 	rm -f test-tmplink-cli
 	rm -f test-tmplink-gui
 	rm -rf dist/
+
+# 清理发布构建文件
+clean-build:
+	@echo "清理发布构建文件..."
+	rm -rf $(BUILD_DIR)/*/$(CLI_BINARY)*
+	rm -rf $(BUILD_DIR)/*/$(GUI_BINARY)*
 
 # 安装到系统
 install: build
@@ -107,36 +155,15 @@ uninstall:
 	sudo rm -f /usr/local/bin/$(CLI_BINARY)
 	sudo rm -f /usr/local/bin/$(GUI_BINARY)
 
-# 构建所有平台
-build-all: build-linux build-windows build-darwin
-
-# 构建Linux版本
-build-linux:
-	@echo "构建Linux版本..."
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/linux/$(CLI_BINARY) $(CLI_SOURCE)
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o dist/linux/$(GUI_BINARY) $(GUI_SOURCE)
-
-# 构建Windows版本
-build-windows:
-	@echo "构建Windows版本..."
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/windows/$(CLI_BINARY).exe $(CLI_SOURCE)
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/windows/$(GUI_BINARY).exe $(GUI_SOURCE)
-
-# 构建macOS版本
-build-darwin:
-	@echo "构建macOS版本..."
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/darwin/$(CLI_BINARY) $(CLI_SOURCE)
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/darwin/$(GUI_BINARY) $(GUI_SOURCE)
-
 # 创建发布包
-dist: clean build-all
+dist: build-release
 	@echo "创建发布包..."
-	@mkdir -p dist
-	@for os in linux windows darwin; do \
-		echo "打包 $$os..."; \
-		cd dist/$$os && tar -czf ../tmplink-$$os-amd64.tar.gz *; \
-		cd ../..; \
+	@cd $(BUILD_DIR) && for dir in */; do \
+		platform=$${dir%/}; \
+		echo "打包 $$platform..."; \
+		tar -czf tmplink-$$platform.tar.gz $$dir; \
 	done
+	@echo "发布包创建完成，位于 $(BUILD_DIR)/ 目录"
 
 # 开发环境设置
 dev-setup:
@@ -145,29 +172,48 @@ dev-setup:
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@echo "开发环境设置完成"
 
+# 显示构建状态
+status:
+	@echo "构建状态检查..."
+	@echo "本地构建文件:"
+	@ls -la $(CLI_BINARY) $(GUI_BINARY) 2>/dev/null || echo "  未找到本地构建文件"
+	@echo ""
+	@echo "发布构建文件:"
+	@find $(BUILD_DIR) -name "$(CLI_BINARY)*" -o -name "$(GUI_BINARY)*" 2>/dev/null | head -10 || echo "  未找到发布构建文件"
+
 # 显示帮助信息
 help:
-	@echo "TmpLink Uploader 构建系统"
+	@echo "钛盘上传工具构建系统"
 	@echo ""
-	@echo "可用命令:"
-	@echo "  build       - 构建所有可执行文件"
+	@echo "构建命令:"
+	@echo "  build       - 构建当前平台版本"
 	@echo "  build-cli   - 只构建CLI程序"
 	@echo "  build-gui   - 只构建GUI程序"
-	@echo "  deps        - 安装依赖"
-	@echo "  test        - 运行测试"
-	@echo "  test-coverage - 运行测试并生成覆盖率报告"
 	@echo "  run         - 运行GUI程序（开发模式）"
 	@echo "  run-cli     - 运行CLI程序"
 	@echo "  run-gui     - 运行GUI程序"
+	@echo ""
+	@echo "发布命令:"
+	@echo "  release     - 构建所有平台发布版本"
+	@echo "  build-release - 同 release"
+	@echo "  build-all   - 同 release"
+	@echo "  dist        - 创建发布包"
+	@echo ""
+	@echo "测试命令:"
+	@echo "  test        - 运行测试"
+	@echo "  test-coverage - 运行测试并生成覆盖率报告"
 	@echo "  fmt         - 格式化代码"
 	@echo "  vet         - 运行go vet"
 	@echo "  lint        - 运行golangci-lint"
 	@echo "  check       - 运行所有检查"
-	@echo "  clean       - 清理构建文件"
+	@echo ""
+	@echo "管理命令:"
+	@echo "  deps        - 安装依赖"
+	@echo "  clean       - 清理本地构建文件"
+	@echo "  clean-build - 清理发布构建文件"
 	@echo "  install     - 安装到系统"
 	@echo "  uninstall   - 从系统卸载"
-	@echo "  build-all   - 构建所有平台版本"
-	@echo "  dist        - 创建发布包"
+	@echo "  status      - 显示构建状态"
 	@echo "  dev-setup   - 设置开发环境"
 	@echo "  help        - 显示此帮助信息"
 	@echo ""

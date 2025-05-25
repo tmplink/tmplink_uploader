@@ -10,7 +10,9 @@
 ```bash
 git clone https://github.com/your-username/tmplink_uploader.git
 cd tmplink_uploader
-make build
+make build     # 构建当前平台版本
+# 或
+make release   # 构建所有平台发布版本
 ```
 
 #### 使用预构建版本
