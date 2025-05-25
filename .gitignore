@@ -3,7 +3,6 @@ tmplink
 tmplink-cli
 tmplink-uploader
 dist/
-build/
 
 # 测试文件
 test-tmplink-*
