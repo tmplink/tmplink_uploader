@@ -30,11 +30,10 @@ config.json
 status*.json
 task*.json
 
-# 测试数据
+# 测试数据和参考文件目录
+test/
+reference/
+
+# 测试数据文件
 test_*.txt
 test_*.dat
-test/
-tests/
-
-# 参考文件
-reference/
