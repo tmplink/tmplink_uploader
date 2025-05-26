@@ -1,0 +1,133 @@
+<svg width="500" height="600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .folder {
+        fill: #fef3c7;
+        stroke: #f59e0b;
+        stroke-width: 1;
+      }
+      .file {
+        fill: #e5e7eb;
+        stroke: #6b7280;
+        stroke-width: 1;
+      }
+      .folder-icon {
+        fill: #f59e0b;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .file-icon {
+        fill: #6b7280;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+      }
+      .tree-line {
+        stroke: #9ca3af;
+        stroke-width: 1;
+        fill: none;
+      }
+      .comment {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 10px;
+        fill: #059669;
+        font-style: italic;
+      }
+      .title-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 18px;
+        font-weight: 600;
+        text-anchor: middle;
+        fill: #1f2937;
+      }
+    </style>
+  </defs>
+  
+  <!-- Title -->
+  <text x="250" y="25" class="title-text">项目结构</text>
+  
+  <!-- Root -->
+  <text x="30" y="60" class="folder-icon">📁 tmplink_uploader/</text>
+  
+  <!-- Tree structure -->
+  <line x1="30" y1="70" x2="30" y2="520" class="tree-line"/>
+  
+  <!-- cmd folder -->
+  <line x1="30" y1="80" x2="50" y2="80" class="tree-line"/>
+  <text x="55" y="85" class="folder-icon">📁 cmd/</text>
+  <line x1="50" y1="90" x2="50" y2="140" class="tree-line"/>
+  
+  <!-- tmplink -->
+  <line x1="50" y1="100" x2="70" y2="100" class="tree-line"/>
+  <text x="75" y="105" class="folder-icon">📁 tmplink/</text>
+  <text x="300" y="105" class="comment"># GUI主程序</text>
+  <line x1="70" y1="110" x2="90" y2="110" class="tree-line"/>
+  <text x="95" y="115" class="file-icon">📄 main.go</text>
+  
+  <!-- tmplink-cli -->
+  <line x1="50" y1="130" x2="70" y2="130" class="tree-line"/>
+  <text x="75" y="135" class="folder-icon">📁 tmplink-cli/</text>
+  <text x="300" y="135" class="comment"># CLI程序</text>
+  <line x1="70" y1="140" x2="90" y2="140" class="tree-line"/>
+  <text x="95" y="145" class="file-icon">📄 main.go</text>
+  
+  <!-- internal folder -->
+  <line x1="30" y1="170" x2="50" y2="170" class="tree-line"/>
+  <text x="55" y="175" class="folder-icon">📁 internal/</text>
+  <line x1="50" y1="180" x2="70" y2="180" class="tree-line"/>
+  <text x="75" y="185" class="folder-icon">📁 gui/</text>
+  <line x1="70" y1="190" x2="90" y2="190" class="tree-line"/>
+  <text x="95" y="195" class="folder-icon">📁 tui/</text>
+  <text x="300" y="195" class="comment"># TUI界面实现</text>
+  <line x1="90" y1="200" x2="110" y2="200" class="tree-line"/>
+  <text x="115" y="205" class="file-icon">📄 model.go</text>
+  
+  <!-- docs folder -->
+  <line x1="30" y1="230" x2="50" y2="230" class="tree-line"/>
+  <text x="55" y="235" class="folder-icon">📁 docs/</text>
+  <text x="300" y="235" class="comment"># 文档目录</text>
+  <line x1="50" y1="240" x2="50" y2="320" class="tree-line"/>
+  
+  <line x1="50" y1="250" x2="70" y2="250" class="tree-line"/>
+  <text x="75" y="255" class="file-icon">📄 usage.md</text>
+  
+  <line x1="50" y1="270" x2="70" y2="270" class="tree-line"/>
+  <text x="75" y="275" class="file-icon">📄 technical.md</text>
+  
+  <line x1="50" y1="290" x2="70" y2="290" class="tree-line"/>
+  <text x="75" y="295" class="file-icon">📄 api.md</text>
+  
+  <line x1="50" y1="310" x2="70" y2="310" class="tree-line"/>
+  <text x="75" y="315" class="file-icon">📄 design.md</text>
+  
+  <!-- test folder -->
+  <line x1="30" y1="340" x2="50" y2="340" class="tree-line"/>
+  <text x="55" y="345" class="folder-icon">📁 test/</text>
+  <text x="300" y="345" class="comment"># 测试文件</text>
+  
+  <!-- build folder -->
+  <line x1="30" y1="370" x2="50" y2="370" class="tree-line"/>
+  <text x="55" y="375" class="folder-icon">📁 build/</text>
+  <text x="300" y="375" class="comment"># 构建产物</text>
+  
+  <!-- reference folder -->
+  <line x1="30" y1="400" x2="50" y2="400" class="tree-line"/>
+  <text x="55" y="405" class="folder-icon">📁 reference/</text>
+  <text x="300" y="405" class="comment"># 参考实现</text>
+  
+  <!-- Root files -->
+  <line x1="30" y1="430" x2="50" y2="430" class="tree-line"/>
+  <text x="55" y="435" class="file-icon">📄 README.md</text>
+  
+  <line x1="30" y1="450" x2="50" y2="450" class="tree-line"/>
+  <text x="55" y="455" class="file-icon">📄 CLAUDE.md</text>
+  
+  <line x1="30" y1="470" x2="50" y2="470" class="tree-line"/>
+  <text x="55" y="475" class="file-icon">📄 Makefile</text>
+  
+  <line x1="30" y1="490" x2="50" y2="490" class="tree-line"/>
+  <text x="55" y="495" class="file-icon">📄 go.mod</text>
+  
+  <line x1="30" y1="510" x2="50" y2="510" class="tree-line"/>
+  <text x="55" y="515" class="file-icon">📄 go.sum</text>
+</svg>

@@ -35,11 +35,12 @@ This is a dual-process uploader tool for [钛盘](https://tmp.link/), written in
 **Upload Features:**
 1. **Chunked Upload**: Configurable chunk size (default 3MB, max 80MB)
 2. **Progress Tracking**: Real-time progress with upload speed calculation via status file updates
-3. **Resumable Uploads**: SHA1-based deduplication and instant uploads
-4. **Multi-threading**: Concurrent chunk uploads within each CLI process
-5. **Error Handling**: Fast-fail approach with clear error messages
-6. **Upload Speed Display**: Real-time speed monitoring with weighted averaging algorithm
-7. **Server Selection**: Dynamic server list from API with manual selection for sponsored users
+3. **Resumable Uploads**: Complete breakpoint resume capability with automatic slice status detection
+4. **Quick Upload**: SHA1-based deduplication and instant uploads for duplicate files
+5. **Multi-threading**: Concurrent chunk uploads within each CLI process
+6. **Error Handling**: Fast-fail approach with clear error messages
+7. **Upload Speed Display**: Real-time speed monitoring with weighted averaging algorithm
+8. **Server Selection**: Dynamic server list from API with manual selection for sponsored users
 
 ### API Integration
 
@@ -103,7 +104,7 @@ The application implements a tiered permission system based on user sponsor stat
 
 **Regular Users:**
 - File upload and download functionality
-- Basic settings: timeout configuration only
+- Basic settings and standard upload functionality
 - Default automatic server selection
 - Standard upload speed monitoring
 
@@ -154,30 +155,68 @@ The terminal user interface is built with bubbletea following the Elm architectu
 - Status bar optimization to ensure key commands remain visible
 - Permission-aware settings interface with locked/unlocked indicators
 
+### CLI Operating Modes
+
+The tmplink-cli process automatically selects its operating mode based on the presence of the `-task-id` parameter:
+
+#### CLI Mode (Interactive Use)
+**Trigger**: No `-task-id` parameter provided
+```bash
+./tmplink-cli -file document.pdf  # Automatic CLI mode
+```
+
+**Features**:
+- 🎯 **Real-time Progress Bar**: Visual progress display similar to wget/curl
+- ⚡ **Speed Monitoring**: Current and average upload speed display
+- ⏱️ **ETA Calculation**: Estimated time remaining
+- 🎨 **Enhanced UI**: Emoji and color-enhanced user experience
+- 📊 **Detailed Stats**: File size, total time, and completion summary
+
+#### GUI Mode (Programmatic Use)
+**Trigger**: `-task-id` parameter provided
+```bash
+./tmplink-cli -file document.pdf -task-id upload_123  # GUI mode
+```
+
+**Features**:
+- 📄 **Status File Output**: Progress written to JSON status files
+- 🔄 **Silent Operation**: Suitable for programmatic invocation
+- 📡 **IPC Communication**: Communicates with GUI via status files
+
 ### CLI Parameters
 
 The tmplink-cli process accepts the following command-line parameters:
 
-**Required Parameters (Minimal Set):**
+**Required Parameters:**
 - `-file`: Path to the file to upload
-- `-token`: 钛盘 API token  
-- `-task-id`: Unique task identifier
-- `-status-file`: Path to JSON status file for progress communication
+
+**Token Requirements:** API token must be provided through one of:
+- `-set-token`: Pre-save token to configuration file
+- `-token`: Provide token temporarily via command line
 
 **Optional Configuration Parameters:**
-- `-api-server`: API server URL (default: https://tmplink-sec.vxtrans.com/api_v2)
-- `-upload-server`: Force specific upload server URL (optional, overrides API server selection)
-- `-chunk-size`: Chunk size in bytes (default: 3MB, max: 80MB)
-- `-timeout`: Request timeout in seconds (default: 300)
-- `-model`: File expiration period (default: 0, 24 hours)
+- `-chunk-size`: Chunk size in MB (default: 3MB, range: 1-99MB)
+- `-model`: File expiration period (default: saved value or 0=24 hours)
   - `0`: 24 hours (default)
   - `1`: 3 days
   - `2`: 7 days  
   - `99`: Permanent (no expiration)
-- `-mr-id`: Resource ID (default: "0" for root directory, for specific upload contexts)
-- `-skip-upload`: Skip upload flag (default: 1, enables instant upload check)
-- `-uid`: User ID (optional, auto-obtained from token validation if not provided)
+- `-mr-id`: Directory ID (default: saved value or "0" for root directory)
+- `-skip-upload`: Enable instant upload check (default: 1=enabled)
+- `-upload-server`: Force specific upload server URL (optional, overrides API selection)
+- `-server-name`: Upload server display name (optional, for display only)
+- `-task-id`: Task identifier (default: auto-generated)
+- `-status-file`: Status file path (default: auto-generated)
 - `-debug`: Enable debug mode for detailed logging
+
+**Configuration Management Parameters:**
+- `-set-token`: Set and save API token to configuration file
+- `-set-model`: Set and save default file expiration period
+- `-set-mr-id`: Set and save default directory ID
+
+**API Server Architecture:**
+- **API Server**: Fixed at `https://tmplink-sec.vxtrans.com/api_v2` (hardcoded, not configurable)
+- **Upload Servers**: Dynamic allocation via API, can be manually overridden with `-upload-server`
 
 **API Upload Parameters:**
 
@@ -191,7 +230,7 @@ The CLI generates API calls with the following complete parameter set for upload
 6. `filesize` - Total file size in bytes
 7. `slice_size` - Chunk size in bytes
 8. `utoken` - Server-provided upload token from upload_request_select2
-9. `mr_id` - Resource ID (default "0" for root directory)
+9. `mr_id` - Directory ID (default "0" for root directory)
 10. `model` - File expiration period (0 = 24 hours, 1 = 3 days, 2 = 7 days, 99 = permanent)
 
 **Internal Parameter Processing:**
@@ -243,6 +282,17 @@ The CLI automatically handles the following internally:
 - `github.com/mattn/go-runewidth` - Unicode width calculation for Chinese characters
 - `github.com/schollz/progressbar/v3` - Progress bars
 
+## Documentation Structure
+
+This project maintains comprehensive documentation in the following structure:
+
+- **README.md**: Installation and basic usage guide for end users
+- **docs/usage.md**: Detailed usage guide with comprehensive examples
+- **docs/technical.md**: Technical documentation for developers and advanced users
+- **docs/api.md**: API integration specifications and endpoints
+- **docs/design.md**: System design philosophy and architecture decisions
+- **CLAUDE.md**: Development context and guidelines for Claude Code
+
 ## Code Structure
 
 ### Error Handling
@@ -257,9 +307,8 @@ The CLI automatically handles the following internally:
 
 ### Configuration
 - JSON-based config file at `~/.tmplink_config.json`
-- Default values: 3MB chunks, 5 concurrent uploads, 300s upload timeout
+- Default values: 3MB chunks, 5 concurrent uploads
 - Settings persist between sessions
-- Configurable upload timeout for large files (default 5 minutes)
 - Fast-fail error handling for quick error identification
 
 ### Security
@@ -377,3 +426,41 @@ uploadInfo, err = getUTokenOnly(ctx, config, sha1Hash, fileName, fileInfo.Size()
 - `internal/gui/tui/model.go`: Improved process startup coordination
 
 This fix resolves the core issue where GUI users experienced phantom upload tasks that never actually uploaded files.
+
+### Breakpoint Resume Implementation (2025-05-26)
+
+**Complete Resume Capability**: The Go implementation now matches the JavaScript version's full breakpoint resume functionality.
+
+**Key Implementation Details**:
+
+1. **Slice Status Detection**: 
+   - Parses complete API response including `total`, `wait`, and `next` fields
+   - Automatically calculates uploaded vs pending slices
+   - Initializes resume state only once per upload session
+
+2. **Progress Recovery Algorithm**:
+   ```go
+   // Resume detection and initialization
+   if !resumeTracker.initialized && uploadedSlices > 0 {
+       estimatedBytes := int64(uploadedSlices) * int64(chunkSize)
+       progressCallback(estimatedBytes, fileSize) // Restore progress display
+       resumeTracker.initialized = true
+   }
+   ```
+
+3. **Enhanced Progress Calculation**:
+   - Accounts for already-uploaded slices in progress display
+   - Prevents progress from restarting at 0% during resume
+   - Uses simplified slice-based calculation for accuracy
+
+**API Response Handling**:
+- **Status 3**: Enhanced to parse `total` and `wait` fields for resume detection
+- **Resume Tracker**: New `ResumeTracker` struct prevents duplicate initialization
+- **Debug Output**: Comprehensive logging for resume verification
+
+**Testing**: 
+- Use `./test_resume.sh` to verify resume functionality
+- Supports interruption and restart scenarios
+- Compatible with all chunk sizes (1MB-99MB)
+
+**Compatibility**: Fully backward compatible with existing upload flows, resume detection is transparent to users.

@@ -1,0 +1,100 @@
+<svg width="600" height="300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .process-box {
+        fill: #f8f9fa;
+        stroke: #2563eb;
+        stroke-width: 2;
+        rx: 8;
+      }
+      .gui-box {
+        fill: #dbeafe;
+        stroke: #1d4ed8;
+        stroke-width: 2;
+      }
+      .cli-box {
+        fill: #dcfce7;
+        stroke: #16a34a;
+        stroke-width: 2;
+      }
+      .title-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 16px;
+        font-weight: 600;
+        text-anchor: middle;
+        fill: #1f2937;
+      }
+      .subtitle-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        text-anchor: middle;
+        fill: #6b7280;
+      }
+      .feature-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 10px;
+        fill: #374151;
+      }
+      .arrow {
+        stroke: #7c3aed;
+        stroke-width: 2;
+        fill: none;
+        marker-end: url(#arrowhead);
+      }
+      .comm-line {
+        stroke: #059669;
+        stroke-width: 2;
+        stroke-dasharray: 5,5;
+      }
+      .comm-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 11px;
+        text-anchor: middle;
+        fill: #059669;
+        font-weight: 500;
+      }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed" />
+    </marker>
+  </defs>
+  
+  <!-- GUI Process Box -->
+  <rect x="50" y="80" width="180" height="140" class="process-box gui-box"/>
+  <text x="140" y="105" class="title-text">tmplink</text>
+  <text x="140" y="125" class="subtitle-text">(GUI主程序)</text>
+  
+  <!-- GUI Features -->
+  <text x="65" y="145" class="feature-text">• 文件选择</text>
+  <text x="65" y="160" class="feature-text">• 进度显示</text>
+  <text x="65" y="175" class="feature-text">• 任务管理</text>
+  <text x="65" y="190" class="feature-text">• 配置管理</text>
+  
+  <!-- CLI Process Box -->
+  <rect x="370" y="80" width="180" height="140" class="process-box cli-box"/>
+  <text x="460" y="105" class="title-text">tmplink-cli</text>
+  <text x="460" y="125" class="subtitle-text">(上传进程)</text>
+  
+  <!-- CLI Features -->
+  <text x="385" y="145" class="feature-text">• 文件上传</text>
+  <text x="385" y="160" class="feature-text">• 分片处理</text>
+  <text x="385" y="175" class="feature-text">• 状态更新</text>
+  <text x="385" y="190" class="feature-text">• 错误处理</text>
+  
+  <!-- Launch Arrow -->
+  <path d="M 230 130 L 370 130" class="arrow"/>
+  <text x="300" y="120" class="comm-text">启动子进程</text>
+  
+  <!-- Communication Line -->
+  <path d="M 230 170 L 370 170" class="comm-line"/>
+  <path d="M 370 170 L 230 170" class="comm-line"/>
+  <text x="300" y="185" class="comm-text">JSON状态文件</text>
+  
+  <!-- Control Flow -->
+  <path d="M 140 220 Q 300 250 460 220" class="arrow"/>
+  <text x="300" y="260" class="comm-text">启动和监控</text>
+  
+  <!-- Title -->
+  <text x="300" y="30" class="title-text" style="font-size: 20px;">双进程架构</text>
+</svg>

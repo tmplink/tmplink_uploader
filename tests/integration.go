@@ -148,7 +148,7 @@ func TestStatusFileOperations(t *testing.T) {
 		"-token", "invalid-token",
 		"-task-id", "test-task",
 		"-status-file", statusFile,
-		"-timeout", "5", // 5秒超时
+		"-debug", // 调试模式
 	)
 
 	// 启动命令但不等待完成

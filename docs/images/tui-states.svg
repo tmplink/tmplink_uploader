@@ -1,0 +1,133 @@
+<svg width="800" height="400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .state-box {
+        fill: #f0f9ff;
+        stroke: #0ea5e9;
+        stroke-width: 2;
+        rx: 8;
+      }
+      .init-state {
+        fill: #fef3c7;
+        stroke: #f59e0b;
+        stroke-width: 2;
+      }
+      .main-state {
+        fill: #dcfce7;
+        stroke: #16a34a;
+        stroke-width: 2;
+      }
+      .state-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        text-anchor: middle;
+        fill: #1f2937;
+      }
+      .arrow {
+        stroke: #7c3aed;
+        stroke-width: 2;
+        fill: none;
+        marker-end: url(#arrowhead);
+      }
+      .back-arrow {
+        stroke: #6b7280;
+        stroke-width: 1.5;
+        fill: none;
+        marker-end: url(#greyarrow);
+        stroke-dasharray: 3,3;
+      }
+      .title-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 18px;
+        font-weight: 600;
+        text-anchor: middle;
+        fill: #1f2937;
+      }
+      .key-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 9px;
+        text-anchor: middle;
+        fill: #6b7280;
+        font-style: italic;
+      }
+    </style>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" 
+            refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#7c3aed" />
+    </marker>
+    <marker id="greyarrow" markerWidth="8" markerHeight="6" 
+            refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#6b7280" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="400" y="25" class="title-text">TUI界面状态流转</text>
+  
+  <!-- Loading State -->
+  <rect x="50" y="80" width="100" height="50" class="state-box init-state"/>
+  <text x="100" y="108" class="state-text">stateLoading</text>
+  
+  <!-- Arrow to Main -->
+  <path d="M 150 105 L 190 105" class="arrow"/>
+  
+  <!-- Main State -->
+  <rect x="190" y="80" width="100" height="50" class="state-box main-state"/>
+  <text x="240" y="108" class="state-text">stateMain</text>
+  
+  <!-- From Main to other states -->
+  <path d="M 290 105 L 340 80" class="arrow"/>
+  <text x="315" y="75" class="key-text">Enter</text>
+  
+  <rect x="340" y="50" width="120" height="50" class="state-box"/>
+  <text x="400" y="78" class="state-text">stateFileSelect</text>
+  
+  <path d="M 460 75 L 520 75" class="arrow"/>
+  <text x="490" y="70" class="key-text">选择文件</text>
+  
+  <rect x="520" y="50" width="120" height="50" class="state-box"/>
+  <text x="580" y="78" class="state-text">stateUploadList</text>
+  
+  <!-- Settings State -->
+  <path d="M 290 105 L 340 105" class="arrow"/>
+  <text x="315" y="100" class="key-text">Tab</text>
+  
+  <rect x="340" y="110" width="120" height="50" class="state-box"/>
+  <text x="400" y="138" class="state-text">stateSettings</text>
+  
+  <!-- Upload List direct -->
+  <path d="M 290 105 L 340 150" class="arrow"/>
+  <text x="315" y="140" class="key-text">↑/↓</text>
+  
+  <rect x="340" y="170" width="120" height="50" class="state-box"/>
+  <text x="400" y="198" class="state-text">stateUploadList</text>
+  
+  <!-- Back arrows (dashed) -->
+  <path d="M 340 80 L 290 95" class="back-arrow"/>
+  <text x="315" y="90" class="key-text">Esc</text>
+  
+  <path d="M 340 125 L 290 115" class="back-arrow"/>
+  <text x="315" y="125" class="key-text">Esc</text>
+  
+  <path d="M 340 185 L 290 125" class="back-arrow"/>
+  <text x="315" y="155" class="key-text">Esc</text>
+  
+  <path d="M 520 95 L 460 95" class="back-arrow"/>
+  <text x="490" y="95" class="key-text">Esc</text>
+  
+  <!-- Component Structure -->
+  <text x="400" y="290" class="title-text" style="font-size: 16px;">TUI组件结构</text>
+  
+  <rect x="50" y="320" width="700" height="60" class="state-box" style="fill: #f8fafc; stroke: #64748b;"/>
+  <text x="70" y="340" class="state-text">Navigation (list.Model)</text>
+  <text x="70" y="355" class="state-text">Content Display (viewport.Model)</text>
+  <text x="70" y="370" class="state-text">Input Forms (textinput.Model)</text>
+  
+  <text x="300" y="340" class="state-text">Progress Bars (progress.Model)</text>
+  <text x="300" y="355" class="state-text">Status Indicators (spinner.Model)</text>
+  
+  <text x="550" y="340" class="state-text">文件浏览器</text>
+  <text x="550" y="355" class="state-text">设置界面</text>
+  <text x="550" y="370" class="state-text">上传管理</text>
+</svg>

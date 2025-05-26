@@ -6,19 +6,7 @@
 
 钛盘上传工具采用双进程架构，将用户界面和文件上传逻辑分离：
 
-```
-┌─────────────────┐    JSON 状态文件    ┌─────────────────┐
-│   tmplink       │ ◄─────────────────► │  tmplink-cli    │
-│   (TUI进程)     │                     │  (上传进程)     │
-│                 │                     │                 │
-│ • 文件选择      │                     │ • 文件上传      │
-│ • 进度显示      │                     │ • 分片处理      │
-│ • 任务管理      │                     │ • 状态更新      │
-│ • 配置管理      │                     │ • 错误处理      │
-└─────────────────┘                     └─────────────────┘
-        │                                       │
-        └─── 启动和监控 ────────────────────────┘
-```
+![双进程架构](images/dual-process-architecture.svg)
 
 ### 设计优势
 
@@ -52,44 +40,13 @@ func (m TUIModel) View() string
 
 #### 状态管理
 
-```
-stateLoading ──→ stateMain ──┬──→ stateFileSelect ──→ stateUploadList
-                             │
-                             ├──→ stateSettings
-                             │
-                             └──→ stateUploadList
-```
-
-#### 组件层次
-
-```
-TUIModel
-├── Navigation (list.Model)
-├── Content Display (viewport.Model)
-├── Input Forms (textinput.Model)
-├── Progress Bars (progress.Model)
-└── Status Indicators (spinner.Model)
-```
+![TUI状态流转](images/tui-states.svg)
 
 ### CLI 组件 (tmplink-cli)
 
 #### 处理流程
 
-```
-参数解析 ──→ Token验证 ──→ 文件分析 ──→ 服务器选择 ──→ 上传处理 ──→ 状态更新
-    │           │           │           │             │           │
-    │           │           │           │             │           └─→ JSON状态文件
-    │           │           │           │             │
-    │           │           │           │             └─→ 分片上传/秒传检查
-    │           │           │           │
-    │           │           │           └─→ 上传服务器发现
-    │           │           │
-    │           │           └─→ SHA1计算/文件大小获取
-    │           │
-    │           └─→ UID获取/Token有效性验证
-    │
-    └─→ 命令行参数验证
-```
+![CLI处理流程](images/cli-process-flow.svg)
 
 #### 核心算法
 
@@ -99,15 +56,8 @@ uptoken := sha1.Sum([]byte(uid + filename + filesize + sliceSize))
 ```
 
 **分片上传状态机**:
-```
-准备阶段 ──→ 服务器查询 ──┬──→ 秒传成功 (状态1/6/8)
-                        │
-                        ├──→ 等待重试 (状态2)
-                        │
-                        ├──→ 分片上传 (状态3)
-                        │
-                        └──→ 上传失败 (状态7)
-```
+
+![上传状态流转](images/upload-states.svg)
 
 ## 数据结构设计
 
@@ -121,7 +71,6 @@ type Config struct {
     MaxConcurrent  int    `json:"max_concurrent"`
     QuickUpload    bool   `json:"quick_upload"`
     SkipUpload     bool   `json:"skip_upload"`
-    Timeout        int    `json:"timeout"`
 }
 ```
 
@@ -165,27 +114,11 @@ type UploadResult struct {
 
 ### 认证流程
 
-```
-浏览器 localStorage ──→ Token获取 ──→ API验证 ──→ UID获取
-                                    │
-                                    └─→ 用户信息缓存
-```
+![认证流程](images/auth-flow.svg)
 
 ### 上传流程
 
-```
-文件选择 ──→ SHA1计算 ──→ 上传准备 ──→ 服务器分配 ──→ 分片上传
-    │           │           │           │          │
-    │           │           │           │          └─→ 进度回调
-    │           │           │           │
-    │           │           │           └─→ 服务器URL获取
-    │           │           │
-    │           │           └─→ Uptoken生成
-    │           │
-    │           └─→ 文件完整性校验
-    │
-    └─→ 文件大小/类型验证
-```
+![文件上传流程](images/upload-flow.svg)
 
 ### 错误处理机制
 
@@ -195,7 +128,6 @@ type UploadResult struct {
 type ErrorConfig struct {
     EnableDebug   bool
     LogLevel      string
-    TimeoutMs     int
 }
 
 func fastFail(err error, config ErrorConfig) error {

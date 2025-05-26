@@ -5,9 +5,12 @@
 ## API 端点
 
 ### 基础信息
-- **Base URL**: `https://tmplink-sec.vxtrans.com/api_v2`
+- **API服务器**: `https://tmplink-sec.vxtrans.com/api_v2` (固定地址)
+- **上传服务器**: 动态分配，通过API获取可用服务器列表
 - **请求格式**: `application/x-www-form-urlencoded`
 - **认证方式**: Token 认证
+
+**注意**: API服务器地址是固定的，程序中硬编码，不可通过参数修改。只有上传服务器可以手动选择或自动分配。
 
 ### 主要端点
 
@@ -64,7 +67,7 @@ POST {server_url}/app/upload_slice
 - `filesize`: 文件大小
 - `slice_size`: 分片大小
 - `utoken`: 服务器提供的上传令牌
-- `mr_id`: 资源ID (默认"0")
+- `mr_id`: 目录ID (默认"0")
 - `model`: 文件有效期
 
 ## 状态码定义
@@ -94,19 +97,11 @@ POST {server_url}/app/upload_slice
 
 ### 1. uptoken 生成算法
 ```go
-uptoken := sha1.Sum([]byte(uid + filename + filesize + slice_size))
+uptoken := sha1.Sum([]byte(sha1Hash + filename + filesize + slice_size))
 ```
 
 ### 2. 上传流程状态机
-```
-文件准备 → SHA1计算 → 服务器查询 → 状态判断
-                                    ├── 状态1/6: 秒传成功
-                                    ├── 状态2: 等待轮询
-                                    ├── 状态3: 开始分片上传
-                                    ├── 状态7: 处理错误
-                                    ├── 状态8: 合并完成
-                                    └── 状态9: 等待合并
-```
+![上传状态流转](images/upload-states.svg)
 
 ### 3. 分片上传算法
 ```go
@@ -122,7 +117,7 @@ func uploadSlice(sliceIndex int, data []byte) error {
         "utoken":     serverUtoken,
         "mr_id":      mrID,
         "model":      strconv.Itoa(model),
-        "slice_index": strconv.Itoa(sliceIndex),
+        "index": strconv.Itoa(sliceIndex),
     }
     
     // 添加文件数据
@@ -174,7 +169,7 @@ func validateParams(params map[string]string) error {
 - `0`: 24小时有效期
 - `1`: 3天有效期  
 - `2`: 7天有效期
-- `99`: 永久有效期
+- `99`: 无限期有效期
 
 ### 3. 并发控制
 - 建议最大并发分片数: 5

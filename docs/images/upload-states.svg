@@ -1,0 +1,168 @@
+<svg width="700" height="500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .state-box {
+        fill: #f0f9ff;
+        stroke: #0ea5e9;
+        stroke-width: 2;
+        rx: 8;
+      }
+      .success-state {
+        fill: #dcfce7;
+        stroke: #16a34a;
+        stroke-width: 2;
+      }
+      .error-state {
+        fill: #fef2f2;
+        stroke: #dc2626;
+        stroke-width: 2;
+      }
+      .waiting-state {
+        fill: #fef3c7;
+        stroke: #f59e0b;
+        stroke-width: 2;
+      }
+      .state-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        text-anchor: middle;
+        fill: #1f2937;
+      }
+      .state-code {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 12px;
+        text-anchor: middle;
+        fill: #6b7280;
+      }
+      .arrow {
+        stroke: #7c3aed;
+        stroke-width: 2;
+        fill: none;
+        marker-end: url(#arrowhead);
+      }
+      .success-arrow {
+        stroke: #16a34a;
+        stroke-width: 2;
+        fill: none;
+        marker-end: url(#greenarrow);
+      }
+      .error-arrow {
+        stroke: #dc2626;
+        stroke-width: 2;
+        fill: none;
+        marker-end: url(#redarrow);
+      }
+      .title-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 20px;
+        font-weight: 600;
+        text-anchor: middle;
+        fill: #1f2937;
+      }
+      .condition-text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 10px;
+        text-anchor: middle;
+        fill: #374151;
+        font-style: italic;
+      }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed" />
+    </marker>
+    <marker id="greenarrow" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a" />
+    </marker>
+    <marker id="redarrow" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="350" y="30" class="title-text">钛盘API上传状态流转</text>
+  
+  <!-- Prepare Phase -->
+  <rect x="50" y="80" width="120" height="60" class="state-box"/>
+  <text x="110" y="105" class="state-text">准备阶段</text>
+  <text x="110" y="125" class="state-code">prepare_v4</text>
+  
+  <!-- Arrow to Server Query -->
+  <path d="M 170 110 L 220 110" class="arrow"/>
+  
+  <!-- Server Query -->
+  <rect x="220" y="80" width="120" height="60" class="state-box"/>
+  <text x="280" y="105" class="state-text">服务器查询</text>
+  <text x="280" y="125" class="state-code">upload_slice</text>
+  
+  <!-- Success States -->
+  <path d="M 340 110 L 420 80" class="success-arrow"/>
+  <rect x="420" y="50" width="120" height="60" class="state-box success-state"/>
+  <text x="480" y="75" class="state-text">秒传成功</text>
+  <text x="480" y="95" class="state-code">状态 1/6</text>
+  
+  <path d="M 340 110 L 560 80" class="success-arrow"/>
+  <rect x="560" y="50" width="120" height="60" class="state-box success-state"/>
+  <text x="620" y="75" class="state-text">上传完成</text>
+  <text x="620" y="95" class="state-code">状态 8</text>
+  
+  <!-- Waiting State -->
+  <path d="M 340 110 L 420 110" class="arrow"/>
+  <rect x="420" y="80" width="120" height="60" class="state-box waiting-state"/>
+  <text x="480" y="105" class="state-text">等待重试</text>
+  <text x="480" y="125" class="state-code">状态 2</text>
+  
+  <!-- Loop back -->
+  <path d="M 420 140 Q 370 170 220 140" class="arrow"/>
+  <text x="320" y="180" class="condition-text">等待轮询</text>
+  
+  <!-- Upload State -->
+  <path d="M 340 110 L 420 170" class="arrow"/>
+  <rect x="420" y="170" width="120" height="60" class="state-box"/>
+  <text x="480" y="195" class="state-text">分片上传</text>
+  <text x="480" y="215" class="state-code">状态 3</text>
+  
+  <!-- Upload Success -->
+  <path d="M 540 200 L 580 140" class="success-arrow"/>
+  <text x="570" y="165" class="condition-text">分片完成</text>
+  
+  <!-- Continue uploading -->
+  <path d="M 420 230 Q 350 260 280 230" class="arrow"/>
+  <text x="350" y="275" class="condition-text">继续上传</text>
+  
+  <!-- Error State -->
+  <path d="M 340 110 L 420 280" class="error-arrow"/>
+  <rect x="420" y="250" width="120" height="60" class="state-box error-state"/>
+  <text x="480" y="275" class="state-text">上传失败</text>
+  <text x="480" y="295" class="state-code">状态 7</text>
+  
+  <!-- Special Error Cases -->
+  <rect x="50" y="350" width="600" height="120" class="state-box" style="fill: #f8fafc; stroke: #64748b;"/>
+  <text x="350" y="375" class="state-text">状态7特殊处理 (根据data值)</text>
+  
+  <rect x="70" y="390" width="100" height="40" class="state-box success-state"/>
+  <text x="120" y="412" class="state-code">data=0: 成功</text>
+  
+  <rect x="190" y="390" width="100" height="40" class="state-box success-state"/>
+  <text x="240" y="412" class="state-code">data=8: 合并完成</text>
+  
+  <rect x="310" y="390" width="100" height="40" class="state-box success-state"/>
+  <text x="360" y="412" class="state-code">data=9: 合并中</text>
+  
+  <rect x="430" y="390" width="100" height="40" class="state-box error-state"/>
+  <text x="480" y="412" class="state-code">其他: 真实错误</text>
+  
+  <!-- Legend -->
+  <text x="350" y="460" class="title-text" style="font-size: 14px;">图例</text>
+  <rect x="250" y="470" width="15" height="15" class="success-state"/>
+  <text x="275" y="482" class="condition-text">成功状态</text>
+  
+  <rect x="350" y="470" width="15" height="15" class="waiting-state"/>
+  <text x="375" y="482" class="condition-text">等待状态</text>
+  
+  <rect x="450" y="470" width="15" height="15" class="error-state"/>
+  <text x="475" y="482" class="condition-text">错误状态</text>
+</svg>
