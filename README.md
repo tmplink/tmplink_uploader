@@ -162,7 +162,7 @@ CLI模式提供类似wget/curl的进度显示：
 |------|------|------|
 | `-set-token` | 设置并保存API Token | `your_token_here` |
 | `-set-model` | 设置默认文件有效期 | `2` |
-| `-set-mr-id` | 设置默认目录ID | `folder123` |
+| `-set-mr-id` | 设置默认目录ID | `xxxx` |
 
 **文件有效期选项：**
 - `0`: 24小时 (默认)

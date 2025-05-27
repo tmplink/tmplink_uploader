@@ -388,10 +388,12 @@ func main() {
 		UpdatedAt:  time.Now(),
 	}
 
-	// 保存初始状态
-	if err := saveTaskStatus(*statusFile, task); err != nil {
-		fmt.Fprintf(os.Stderr, "错误: 保存任务状态失败: %v\n", err)
-		os.Exit(1)
+	// 只有在GUI模式下才保存初始状态到文件
+	if !cliMode {
+		if err := saveTaskStatus(*statusFile, task); err != nil {
+			fmt.Fprintf(os.Stderr, "错误: 保存任务状态失败: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// 转换分块大小从MB到字节
@@ -423,7 +425,10 @@ func main() {
 	// 开始上传
 	task.Status = "uploading"
 	task.UpdatedAt = time.Now()
-	saveTaskStatus(*statusFile, task)
+	// 只有在GUI模式下才保存状态到文件
+	if !cliMode {
+		saveTaskStatus(*statusFile, task)
+	}
 
 	ctx := context.Background()
 
@@ -442,8 +447,10 @@ func main() {
 			fmt.Printf("❗ 错误信息: %v\n", err)
 		} else {
 			// GUI模式：保存状态到文件
-			if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
-				fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
+			if !cliMode {
+				if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
+					fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
+				}
 			}
 		}
 
@@ -471,8 +478,10 @@ func main() {
 		fmt.Printf("🔗 下载链接: %s\n", result.DownloadURL)
 	} else {
 		// GUI模式：保存状态到文件
-		if err := saveTaskStatus(*statusFile, task); err != nil {
-			fmt.Fprintf(os.Stderr, "警告: 保存完成状态失败: %v\n", err)
+		if !cliMode {
+			if err := saveTaskStatus(*statusFile, task); err != nil {
+				fmt.Fprintf(os.Stderr, "警告: 保存完成状态失败: %v\n", err)
+			}
 		}
 	}
 }
