@@ -22,7 +22,7 @@
 
 ### 方式一：下载预编译版本 (推荐)
 
-从 [Releases](https://github.com/tmplink/tmplink_uploader/releases) 下载对应平台的预编译版本：
+从项目的 `build` 目录下载对应平台的预编译版本：
 
 | 平台 | 架构 | 目录 |
 |------|------|------|
@@ -37,7 +37,7 @@
 **安装步骤：**
 
 ```bash
-# 1. 下载并解压对应版本
+# 1. 进入对应平台目录 (如 build/macos-arm64/)
 # 2. 设置执行权限 (macOS/Linux)
 chmod +x tmplink tmplink-cli
 
