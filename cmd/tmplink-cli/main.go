@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,12 +31,12 @@ type CLIConfig struct {
 type Config struct {
 	Token        string
 	Server       string
-	UploadServer string  // 分片上传服务器
+	UploadServer string // 分片上传服务器
 	ChunkSize    int
 	Model        int
 	MrID         string
 	SkipUpload   int
-	Debug        bool    // 调试模式
+	Debug        bool // 调试模式
 }
 
 // getCLIConfigPath 获取CLI配置文件路径
@@ -54,35 +55,35 @@ func loadCLIConfig() CLIConfig {
 	if err != nil {
 		return CLIConfig{Model: 0, MrID: "0"} // 返回默认值
 	}
-	
+
 	var config CLIConfig
 	if err := json.Unmarshal(data, &config); err != nil {
 		return CLIConfig{Model: 0, MrID: "0"} // 返回默认值
 	}
-	
+
 	// 确保MrID有默认值
 	if config.MrID == "" {
 		config.MrID = "0"
 	}
-	
+
 	return config
 }
 
 // saveCLIConfig 保存CLI配置到文件
 func saveCLIConfig(config CLIConfig) error {
 	configPath := getCLIConfigPath()
-	
+
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
-	
+
 	// 确保目录存在
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	
+
 	return os.WriteFile(configPath, data, 0600) // 设置较严格的权限
 }
 
@@ -104,7 +105,7 @@ func debugPrint(config *Config, format string, args ...interface{}) {
 	if config.Debug {
 		logMsg := fmt.Sprintf("[DEBUG] "+format+"\n", args...)
 		fmt.Print(logMsg)
-		
+
 		// 同时写入日志文件
 		if logFile, err := os.OpenFile("api_requests.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 			logFile.WriteString(fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02 15:04:05"), logMsg))
@@ -138,11 +139,11 @@ type UploadResult struct {
 
 // 速度计算器
 type SpeedCalculator struct {
-	startTime     time.Time
-	lastTime      time.Time
-	lastBytes     int64
-	totalBytes    int64
-	currentSpeed  float64 // KB/s
+	startTime    time.Time
+	lastTime     time.Time
+	lastBytes    int64
+	totalBytes   int64
+	currentSpeed float64 // KB/s
 }
 
 // NewSpeedCalculator 创建新的速度计算器
@@ -161,14 +162,14 @@ func NewSpeedCalculator(totalBytes int64) *SpeedCalculator {
 func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
 	now := time.Now()
 	timeDiff := now.Sub(sc.lastTime).Seconds()
-	
+
 	// 降低时间间隔要求，对小文件更友好（0.5秒而不是1秒）
 	if timeDiff >= 0.5 {
 		bytesDiff := uploadedBytes - sc.lastBytes
 		if bytesDiff > 0 && timeDiff > 0 {
 			// 计算瞬时速度 (KB/s)
 			instantSpeed := float64(bytesDiff) / 1024.0 / timeDiff
-			
+
 			// 使用加权平均平滑速度波动
 			if sc.currentSpeed == 0 {
 				sc.currentSpeed = instantSpeed
@@ -176,11 +177,11 @@ func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
 				sc.currentSpeed = sc.currentSpeed*0.7 + instantSpeed*0.3
 			}
 		}
-		
+
 		sc.lastTime = now
 		sc.lastBytes = uploadedBytes
 	}
-	
+
 	return sc.currentSpeed
 }
 
@@ -188,12 +189,12 @@ func (sc *SpeedCalculator) UpdateSpeed(uploadedBytes int64) float64 {
 func (sc *SpeedCalculator) GetFinalSpeed() float64 {
 	now := time.Now()
 	totalTime := now.Sub(sc.startTime).Seconds()
-	
+
 	// 如果总时间太短（小于0.1秒），计算理论最大速度
 	if totalTime < 0.1 {
 		totalTime = 0.1 // 假设最少0.1秒
 	}
-	
+
 	// 计算总体平均速度 (KB/s)
 	if totalTime > 0 && sc.totalBytes > 0 {
 		avgSpeed := float64(sc.totalBytes) / 1024.0 / totalTime
@@ -203,8 +204,19 @@ func (sc *SpeedCalculator) GetFinalSpeed() float64 {
 		}
 		return avgSpeed
 	}
-	
+
 	return sc.currentSpeed
+}
+
+// isFlagSet 检查flag是否被用户显式设置
+func isFlagSet(f *flag.Flag) bool {
+	found := false
+	flag.Visit(func(flag *flag.Flag) {
+		if flag.Name == f.Name {
+			found = true
+		}
+	})
+	return found
 }
 
 func main() {
@@ -224,6 +236,7 @@ func main() {
 		mrID         = flag.String("mr-id", "0", "目录ID (默认0=根目录)")
 		skipUpload   = flag.Int("skip-upload", 1, "跳过上传标志 (1=检查秒传)")
 		debugMode    = flag.Bool("debug", false, "调试模式，输出详细运行信息")
+		showStatus   = flag.Bool("status", false, "显示当前配置状态和token有效性")
 	)
 
 	flag.Parse()
@@ -232,13 +245,23 @@ func main() {
 	if *setToken != "" || *setModel >= 0 || *setMrID != "" {
 		config := loadCLIConfig()
 		updated := false
-		
+
 		if *setToken != "" {
-			config.Token = *setToken
-			fmt.Println("Token已成功保存")
-			updated = true
+			// 验证Token有效性
+			fmt.Print("正在验证Token有效性...")
+			server := "https://tmplink-sec.vxtrans.com/api_v2"
+			if uid, err := validateTokenAndGetUID(*setToken, server); err != nil {
+				fmt.Printf("\n错误: Token验证失败: %v\n", err)
+				fmt.Println("请确保Token正确且有效")
+				os.Exit(1)
+			} else {
+				fmt.Printf(" ✅\n")
+				config.Token = *setToken
+				fmt.Printf("Token已成功保存并验证 (UID: %s)\n", uid)
+				updated = true
+			}
 		}
-		
+
 		if *setModel >= 0 {
 			if *setModel == 0 || *setModel == 1 || *setModel == 2 || *setModel == 99 {
 				config.Model = *setModel
@@ -250,40 +273,50 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		
+
 		if *setMrID != "" {
 			config.MrID = *setMrID
 			fmt.Printf("默认目录ID已设置为: %s\n", *setMrID)
 			updated = true
 		}
-		
+
 		if updated {
 			if err := saveCLIConfig(config); err != nil {
 				fmt.Fprintf(os.Stderr, "错误: 保存配置失败: %v\n", err)
 				os.Exit(1)
 			}
 		}
-		
+
+		return
+	}
+
+	// 处理状态查询的情况
+	if *showStatus {
+		showConfigStatus()
 		return
 	}
 
 	// 加载保存的配置作为默认值
 	savedConfig := loadCLIConfig()
-	
+
 	// 参数优先级处理: 命令行参数 > 保存的配置 > 默认值
 	finalToken := *token
 	if finalToken == "" {
 		finalToken = savedConfig.Token
 	}
-	
+
+	// 检查model参数是否被显式设置
+	modelFlag := flag.Lookup("model")
 	finalModel := *model
-	if flag.Lookup("model").Value.String() == flag.Lookup("model").DefValue {
+	if !isFlagSet(modelFlag) {
 		// 如果用户没有指定model参数，使用保存的配置
 		finalModel = savedConfig.Model
 	}
-	
+
+	// 检查mr-id参数是否被显式设置
+	mrIDFlag := flag.Lookup("mr-id")
 	finalMrID := *mrID
-	if flag.Lookup("mr-id").Value.String() == flag.Lookup("mr-id").DefValue {
+	if !isFlagSet(mrIDFlag) {
 		// 如果用户没有指定mr-id参数，使用保存的配置
 		finalMrID = savedConfig.MrID
 	}
@@ -303,7 +336,7 @@ func main() {
 
 	// 检测是否为CLI模式（用户未提供task-id）
 	cliMode := *taskID == ""
-	
+
 	// 自动生成task-id (如果未提供)
 	if cliMode {
 		*taskID = fmt.Sprintf("upload_%d", time.Now().Unix())
@@ -336,7 +369,7 @@ func main() {
 	// 验证文件大小限制 (50GB)
 	const maxFileSize = 50 * 1024 * 1024 * 1024 // 50GB
 	if fileInfo.Size() > maxFileSize {
-		fmt.Fprintf(os.Stderr, "错误: 文件大小超出限制，最大支持50GB，当前文件: %.2fGB\n", 
+		fmt.Fprintf(os.Stderr, "错误: 文件大小超出限制，最大支持50GB，当前文件: %.2fGB\n",
 			float64(fileInfo.Size())/(1024*1024*1024))
 		os.Exit(1)
 	}
@@ -363,19 +396,19 @@ func main() {
 
 	// 转换分块大小从MB到字节
 	chunkSizeBytes := *chunkSizeMB * 1024 * 1024
-	
+
 	// 创建上传配置
 	config := &Config{
-		Token:        finalToken,    // 使用最终确定的token
+		Token:        finalToken,                               // 使用最终确定的token
 		Server:       "https://tmplink-sec.vxtrans.com/api_v2", // 固定API服务器地址
-		UploadServer: *uploadServer, // 用户指定的上传服务器
+		UploadServer: *uploadServer,                            // 用户指定的上传服务器
 		ChunkSize:    chunkSizeBytes,
-		Model:        finalModel,    // 使用最终确定的model
-		MrID:         finalMrID,     // 使用最终确定的mrID
+		Model:        finalModel, // 使用最终确定的model
+		MrID:         finalMrID,  // 使用最终确定的mrID
 		SkipUpload:   *skipUpload,
 		Debug:        *debugMode,
 	}
-	
+
 	debugPrint(config, "启动CLI上传程序")
 	debugPrint(config, "文件路径: %s", *filePath)
 	debugPrint(config, "分片大小: %d bytes (%dMB)", chunkSizeBytes, *chunkSizeMB)
@@ -383,7 +416,7 @@ func main() {
 
 	// 创建速度计算器
 	speedCalc := NewSpeedCalculator(fileInfo.Size())
-	
+
 	// 设置进度回调
 	progressCallback := createProgressCallback(cliMode, fileInfo.Size(), speedCalc, task, *statusFile)
 
@@ -433,7 +466,7 @@ func main() {
 		fmt.Printf("📁 文件名: %s\n", task.FileName)
 		fmt.Printf("📊 文件大小: %s\n", formatBytes(fileInfo.Size()))
 		fmt.Printf("⚡ 平均速度: %.2f MB/s\n", task.UploadSpeed)
-		
+
 		duration := time.Since(speedCalc.startTime)
 		fmt.Printf("⏱️  总耗时: %v\n", duration.Round(time.Second))
 		fmt.Printf("🔗 下载链接: %s\n", result.DownloadURL)
@@ -464,7 +497,7 @@ func saveTaskStatus(statusFile string, task *TaskStatus) error {
 // uploadFile 上传文件 - 完全按照JavaScript逻辑
 func uploadFile(ctx context.Context, config *Config, filePath string, progressCallback func(int64, int64)) (*UploadResult, error) {
 	debugPrint(config, "开始上传文件: %s", filePath)
-	
+
 	// 计算文件SHA1
 	debugPrint(config, "正在计算文件SHA1...")
 	sha1Hash, err := calculateSHA1(filePath)
@@ -483,7 +516,7 @@ func uploadFile(ctx context.Context, config *Config, filePath string, progressCa
 	fileName := filepath.Base(filePath)
 
 	var uploadInfo *UploadInfo
-	
+
 	// 检查是否为GUI模式（已预设上传服务器）
 	if config.UploadServer != "" {
 		debugPrint(config, "GUI模式: 使用预设的上传服务器: %s", config.UploadServer)
@@ -513,7 +546,7 @@ func uploadFile(ctx context.Context, config *Config, filePath string, progressCa
 	if err != nil {
 		return nil, fmt.Errorf("检查秒传失败: %w", err)
 	}
-	
+
 	if !needUpload {
 		debugPrint(config, "秒传成功! 下载链接: %s", downloadURL)
 		return &UploadResult{DownloadURL: downloadURL}, nil
@@ -548,8 +581,8 @@ func calculateSHA1(filePath string) (string, error) {
 
 // ResumeTracker 续传进度跟踪器
 type ResumeTracker struct {
-	initialized  bool  // 是否已初始化续传状态
-	totalSlices  int   // 总分片数
+	initialized   bool  // 是否已初始化续传状态
+	totalSlices   int   // 总分片数
 	uploadedBytes int64 // 已上传字节数（基于已完成分片估算）
 }
 
@@ -559,42 +592,41 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 	upTokenData := fmt.Sprintf("%s%s%d%d", sha1Hash, fileName, fileSize, config.ChunkSize)
 	upTokenHash := sha1.Sum([]byte(upTokenData))
 	upToken := hex.EncodeToString(upTokenHash[:])
-	
+
 	debugPrint(config, "生成uptoken: %s -> %s", upTokenData, upToken)
 	debugPrint(config, "开始分片上传状态机循环...")
-	
+
 	client := &http.Client{}
-	
+
 	// 初始化续传跟踪器
 	resumeTracker := &ResumeTracker{
 		initialized:   false,
 		totalSlices:   0,
 		uploadedBytes: 0,
 	}
-	
+
 	// 添加循环计数器，防止无限循环
 	loopCount := 0
 	maxLoops := 1000 // 允许最多1000次状态机循环
-	
-	
+
 	for {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		default:
 		}
-		
+
 		// 检查循环次数，防止无限循环
 		loopCount++
 		if loopCount > maxLoops {
 			return "", fmt.Errorf("上传超时，状态机循环次数过多（%d次）", loopCount)
 		}
-		
+
 		// 查询分片信息 (prepare)
 		debugPrint(config, "========== API请求 #%d ==========", loopCount)
 		prepareData := fmt.Sprintf("token=%s&uptoken=%s&action=prepare&sha1=%s&filename=%s&filesize=%d&slice_size=%d&utoken=%s&mr_id=%s&model=%d",
 			config.Token, upToken, sha1Hash, fileName, fileSize, config.ChunkSize, utoken, config.MrID, config.Model)
-		
+
 		debugPrint(config, "请求URL: %s", config.UploadServer+"/app/upload_slice")
 		debugPrint(config, "请求方法: POST")
 		debugPrint(config, "Content-Type: application/x-www-form-urlencoded")
@@ -639,7 +671,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			debugPrint(config, "JSON解析失败: %v", err)
 			return "", fmt.Errorf("JSON解析失败: %w", err)
 		}
-		
+
 		debugPrint(config, "解析结果 - 状态码: %d, 数据: %v, Debug: %v", prepareResp.Status, prepareResp.Data, prepareResp.Debug)
 
 		switch prepareResp.Status {
@@ -650,7 +682,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 			return "", fmt.Errorf("无法获取ukey")
-			
+
 		case 6:
 			// 文件已被其他人上传，直接跳过
 			debugPrint(config, "状态6: 文件已存在，直接返回")
@@ -658,7 +690,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 				return fmt.Sprintf("https://tmp.link/f/%s", ukey), nil
 			}
 			return "", fmt.Errorf("无法获取ukey")
-			
+
 		case 8:
 			// 分片合并完成 - 按照JavaScript逻辑直接成功
 			debugPrint(config, "状态8: 分片合并完成，上传成功")
@@ -670,7 +702,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 				return fmt.Sprintf("https://tmp.link/f/%d", int64(ukeyNum)), nil
 			}
 			return "", fmt.Errorf("无法获取ukey")
-			
+
 		case 9:
 			// 文件合并进程正在进行中，按照JavaScript逻辑直接成功
 			debugPrint(config, "状态9: 合并进行中，按JS逻辑直接成功")
@@ -681,13 +713,13 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 			debugPrint(config, "状态9: 没有ukey，等待2秒...")
 			time.Sleep(2 * time.Second)
 			continue
-			
+
 		case 2:
 			// 没有可上传分片，等待所有分片完成
 			debugPrint(config, "状态2: 等待分片完成，等待5秒...")
 			time.Sleep(5 * time.Second)
 			continue
-			
+
 		case 3:
 			// 获得一个需要上传的分片编号，开始处理上传
 			debugPrint(config, "状态3: 需要上传分片")
@@ -695,74 +727,74 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 				// 解析完整的分片信息（支持续传检测）
 				var totalSlices, waitingSlices, uploadedSlices int
 				var nextSlice int = -1
-				
+
 				// 解析总分片数
 				if total, ok := dataMap["total"].(float64); ok {
 					totalSlices = int(total)
 					resumeTracker.totalSlices = totalSlices
 					debugPrint(config, "总分片数: %d", totalSlices)
 				}
-				
+
 				// 解析待上传分片数
 				if wait, ok := dataMap["wait"].(float64); ok {
 					waitingSlices = int(wait)
 					uploadedSlices = totalSlices - waitingSlices
 					debugPrint(config, "待上传分片数: %d, 已完成分片数: %d", waitingSlices, uploadedSlices)
 				}
-				
+
 				// 解析下一个要上传的分片编号
 				if nextFloat, ok := dataMap["next"].(float64); ok {
 					nextSlice = int(nextFloat)
 					debugPrint(config, "下一个分片编号: %d", nextSlice)
 				}
-				
+
 				// 断点续传初始化 - 只在第一次检测到续传时执行
 				if !resumeTracker.initialized && uploadedSlices > 0 && totalSlices > 0 {
 					resumeTracker.initialized = true
-					
+
 					// 计算已上传字节数（基于已完成分片估算）
 					estimatedBytes := int64(uploadedSlices) * int64(config.ChunkSize)
 					if estimatedBytes > fileSize {
 						estimatedBytes = fileSize
 					}
 					resumeTracker.uploadedBytes = estimatedBytes
-					
+
 					// 计算续传进度百分比
 					progressPercent := float64(uploadedSlices) / float64(totalSlices) * 100
-					
-					debugPrint(config, "🔄 检测到断点续传: 已完成 %d/%d 分片 (%.1f%%)", 
+
+					debugPrint(config, "🔄 检测到断点续传: 已完成 %d/%d 分片 (%.1f%%)",
 						uploadedSlices, totalSlices, progressPercent)
-					debugPrint(config, "🔄 估算已上传字节数: %d/%d (%s/%s)", 
-						estimatedBytes, fileSize, 
+					debugPrint(config, "🔄 估算已上传字节数: %d/%d (%s/%s)",
+						estimatedBytes, fileSize,
 						formatBytes(estimatedBytes), formatBytes(fileSize))
-					
+
 					// 调用进度回调更新显示
 					if progressCallback != nil {
 						progressCallback(estimatedBytes, fileSize)
 					}
 				}
-				
+
 				// 检查是否有下一个分片需要上传
 				if nextSlice >= 0 {
 					debugPrint(config, "上传分片 #%d", nextSlice)
-					
+
 					// 上传分片
 					err := uploadSlice(ctx, client, config, filePath, fileName, upToken, nextSlice, resumeTracker, progressCallback)
 					if err != nil {
 						return "", fmt.Errorf("分片 %d 上传失败: %w", nextSlice, err)
 					}
 					debugPrint(config, "分片 #%d 上传完成", nextSlice)
-					
+
 					// 继续下一轮查询
 					continue
 				}
 			}
 			return "", fmt.Errorf("无法解析分片信息")
-			
+
 		case 7:
 			// 按照JavaScript逻辑：rsp.data是错误代码，直接传递给upload_final
 			debugPrint(config, "状态7: 上传失败，错误代码: %v", prepareResp.Data)
-			
+
 			// 检查是否是特殊情况：data为0、8或9（按照JavaScript逻辑直接成功）
 			if dataFloat, ok := prepareResp.Data.(float64); ok {
 				if dataFloat == 0 {
@@ -803,9 +835,9 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 					return fmt.Sprintf("https://tmp.link/f/upload_success"), nil
 				}
 			}
-			
+
 			return "", fmt.Errorf("服务器返回上传失败，错误码: %v", prepareResp.Data)
-			
+
 		default:
 			debugPrint(config, "未知状态码: %d", prepareResp.Status)
 			return "", fmt.Errorf("未知状态码: %d", prepareResp.Status)
@@ -825,21 +857,21 @@ func uploadSlice(ctx context.Context, client *http.Client, config *Config, fileP
 	// 计算分片偏移和大小
 	chunkSize := int64(config.ChunkSize)
 	offset := int64(sliceIndex) * chunkSize
-	
+
 	// 读取分片数据
 	_, err = file.Seek(offset, 0)
 	if err != nil {
 		return fmt.Errorf("文件定位失败: %w", err)
 	}
-	
+
 	buffer := make([]byte, chunkSize)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("读取分片数据失败: %w", err)
 	}
-	
+
 	chunkData := buffer[:n]
-	
+
 	// 创建multipart表单
 	debugPrint(config, "========== 上传分片 #%d ==========", sliceIndex)
 	var buf bytes.Buffer
@@ -917,24 +949,23 @@ func uploadSlice(ctx context.Context, client *http.Client, config *Config, fileP
 
 	debugPrint(config, "分片 #%d 上传成功", sliceIndex)
 
-
 	// 更新进度（支持续传）
 	if progressCallback != nil {
 		fileInfo, _ := os.Stat(filePath)
-		
+
 		// 简化的进度计算：基于分片索引 + 1（已完成的分片数）
 		completedSlices := int64(sliceIndex + 1)
 		totalUploadedBytes := completedSlices * int64(config.ChunkSize)
-		
+
 		// 确保不超过文件总大小
 		if totalUploadedBytes > fileInfo.Size() {
 			totalUploadedBytes = fileInfo.Size()
 		}
-		
-		debugPrint(config, "进度更新: 分片#%d完成, 总进度: %d/%d bytes (%.1f%%)", 
-			sliceIndex, totalUploadedBytes, fileInfo.Size(), 
+
+		debugPrint(config, "进度更新: 分片#%d完成, 总进度: %d/%d bytes (%.1f%%)",
+			sliceIndex, totalUploadedBytes, fileInfo.Size(),
 			float64(totalUploadedBytes)/float64(fileInfo.Size())*100)
-		
+
 		progressCallback(totalUploadedBytes, fileInfo.Size())
 	}
 
@@ -951,7 +982,7 @@ type UploadInfo struct {
 func getUTokenOnly(ctx context.Context, config *Config, sha1Hash, fileName string, fileSize int64) (*UploadInfo, error) {
 	debugPrint(config, "========== 获取UToken API ==========")
 	client := &http.Client{}
-	
+
 	formData := fmt.Sprintf("action=upload_request_select2&sha1=%s&filename=%s&filesize=%d&model=%d&token=%s",
 		sha1Hash, fileName, fileSize, config.Model, config.Token)
 
@@ -1014,7 +1045,7 @@ func getUTokenOnly(ctx context.Context, config *Config, sha1Hash, fileName strin
 func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName string, fileSize int64) (*UploadInfo, error) {
 	debugPrint(config, "========== 获取上传服务器API ==========")
 	client := &http.Client{}
-	
+
 	formData := fmt.Sprintf("action=upload_request_select2&sha1=%s&filename=%s&filesize=%d&model=%d&token=%s",
 		sha1Hash, fileName, fileSize, config.Model, config.Token)
 
@@ -1078,7 +1109,7 @@ func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName st
 			}
 		}
 	}
-	
+
 	if uploadServer == "" {
 		return nil, fmt.Errorf("无法获取上传服务器地址")
 	}
@@ -1102,7 +1133,7 @@ func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName st
 func checkQuickUpload(ctx context.Context, config *Config, sha1Hash, fileName string, fileSize int64) (string, bool, error) {
 	debugPrint(config, "========== 检查秒传API ==========")
 	client := &http.Client{}
-	
+
 	formData := fmt.Sprintf("action=prepare_v4&sha1=%s&filename=%s&filesize=%d&model=%d&skip_upload=%d&token=%s",
 		sha1Hash, fileName, fileSize, config.Model, config.SkipUpload, config.Token)
 
@@ -1167,62 +1198,61 @@ func checkQuickUpload(ctx context.Context, config *Config, sha1Hash, fileName st
 	}
 }
 
-
 // validateTokenAndGetUID 验证token并获取用户UID
 func validateTokenAndGetUID(token, server string) (string, error) {
 	client := &http.Client{}
-	
+
 	// 调用/user API验证token并获取用户信息
 	formData := fmt.Sprintf("action=get_detail&token=%s", token)
-	
+
 	req, err := http.NewRequest("POST", server+"/user", strings.NewReader(formData))
 	if err != nil {
 		return "", err
 	}
-	
+
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP请求失败: %d", resp.StatusCode)
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	
+
 	var userResp struct {
 		Status int `json:"status"`
 		Data   struct {
 			UID int64 `json:"uid"`
 		} `json:"data"`
 	}
-	
+
 	if err := json.Unmarshal(body, &userResp); err != nil {
 		return "", fmt.Errorf("解析用户响应失败: %w", err)
 	}
-	
+
 	if userResp.Status != 1 {
 		return "", fmt.Errorf("token验证失败，状态码: %d", userResp.Status)
 	}
-	
+
 	if userResp.Data.UID == 0 {
 		return "", fmt.Errorf("无法获取用户UID")
 	}
-	
+
 	return fmt.Sprintf("%d", userResp.Data.UID), nil
 }
 
 // UploadTokens 上传所需的tokens
 type UploadTokens struct {
-	UToken      string // 从服务器获取的上传token
-	UpToken     string // 客户端生成的上传token
+	UToken       string // 从服务器获取的上传token
+	UpToken      string // 客户端生成的上传token
 	UploadServer string // 上传服务器地址
 }
 
@@ -1291,7 +1321,7 @@ func prepareUpload(ctx context.Context, config *Config, filePath, sha1Hash strin
 			}
 		}
 	}
-	
+
 	// 检查是否用户强制指定了上传服务器
 	if config.UploadServer != "" {
 		uploadServer = config.UploadServer
@@ -1442,13 +1472,12 @@ func readChunk(file *os.File, chunkIndex int, chunkSize int64) ([]byte, error) {
 	return buffer[:n], nil
 }
 
-
 // uploadChunk 上传单个分片
 func uploadChunk(ctx context.Context, client *http.Client, config *Config, chunkIndex int, chunkData []byte, sha1Hash, fileName string, tokens *UploadTokens, totalFileSize int64) error {
 	// 第一步：查询分片信息 (prepare) - 包含所有必需参数
 	prepareData := fmt.Sprintf("token=%s&uptoken=%s&action=prepare&sha1=%s&filename=%s&filesize=%d&slice_size=%d&utoken=%s&mr_id=%s&model=%d",
 		config.Token, tokens.UpToken, sha1Hash, fileName, totalFileSize, config.ChunkSize, tokens.UToken, config.MrID, config.Model)
-	
+
 	// API参数已准备
 
 	// 使用tokens中的上传服务器地址
@@ -1653,7 +1682,7 @@ func getDownloadURL(ctx context.Context, client *http.Client, config *Config, sh
 // createProgressCallback 创建进度回调函数
 func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalculator, task *TaskStatus, statusFile string) func(int64, int64) {
 	var bar *progressbar.ProgressBar
-	
+
 	// 如果是CLI模式，创建进度条
 	if cliMode {
 		bar = progressbar.NewOptions64(
@@ -1675,7 +1704,7 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 			progressbar.OptionSetRenderBlankState(true),
 			progressbar.OptionClearOnFinish(),
 		)
-		
+
 		fmt.Printf("🚀 开始上传文件: %s\n", task.FileName)
 		fmt.Printf("📊 文件大小: %s\n", formatBytes(fileSize))
 		fmt.Println()
@@ -1683,10 +1712,10 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 
 	return func(uploaded, total int64) {
 		progress := float64(uploaded) / float64(total) * 100
-		
+
 		// 计算上传速度
 		speed := speedCalc.UpdateSpeed(uploaded)
-		
+
 		// 更新任务状态
 		task.Status = "uploading"
 		task.Progress = progress
@@ -1705,6 +1734,126 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 			}
 		}
 	}
+}
+
+// showConfigStatus 显示当前配置状态和token有效性
+func showConfigStatus() {
+	fmt.Println("=== 钛盘上传工具配置状态 ===")
+	fmt.Println()
+
+	// 加载配置
+	config := loadCLIConfig()
+	configPath := getCLIConfigPath()
+
+	// 获取已解析的命令行参数值
+	chunkSizeFlag := flag.Lookup("chunk-size")
+	modelFlag := flag.Lookup("model")
+	mrIDFlag := flag.Lookup("mr-id")
+	skipUploadFlag := flag.Lookup("skip-upload")
+	debugFlag := flag.Lookup("debug")
+
+	// 确定最终使用的值（命令行参数优先级高于配置文件）
+	var finalChunkSize int = 3
+	if chunkSizeFlag != nil {
+		if val, err := strconv.Atoi(chunkSizeFlag.Value.String()); err == nil {
+			finalChunkSize = val
+		}
+	}
+
+	var finalModel int = config.Model
+	if modelFlag != nil && isFlagSet(modelFlag) {
+		if val, err := strconv.Atoi(modelFlag.Value.String()); err == nil {
+			finalModel = val
+		}
+	}
+
+	var finalMrID string = config.MrID
+	if mrIDFlag != nil && isFlagSet(mrIDFlag) {
+		finalMrID = mrIDFlag.Value.String()
+	}
+
+	var finalSkipUpload int = 1
+	if skipUploadFlag != nil {
+		if val, err := strconv.Atoi(skipUploadFlag.Value.String()); err == nil {
+			finalSkipUpload = val
+		}
+	}
+
+	var finalDebug bool = false
+	if debugFlag != nil {
+		if val, err := strconv.ParseBool(debugFlag.Value.String()); err == nil {
+			finalDebug = val
+		}
+	}
+
+	// 显示配置文件信息
+	fmt.Printf("📁 配置文件路径: %s\n", configPath)
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		fmt.Printf("⚠️  配置文件状态: 不存在 (使用默认值)\n")
+	} else {
+		fmt.Printf("✅ 配置文件状态: 存在\n")
+	}
+	fmt.Println()
+
+	// 显示Token信息
+	fmt.Println("🔑 Token配置:")
+	if config.Token == "" {
+		fmt.Printf("   状态: ❌ 未设置\n")
+		fmt.Printf("   建议: 使用 -set-token 命令设置API Token\n")
+	} else {
+		fmt.Printf("   状态: ✅ 已设置\n")
+		fmt.Printf("   长度: %d 字符\n", len(config.Token))
+		fmt.Printf("   前缀: %s...\n", config.Token[:min(8, len(config.Token))])
+
+		// 验证Token有效性
+		fmt.Printf("   验证: ")
+		server := "https://tmplink-sec.vxtrans.com/api_v2"
+		if uid, err := validateTokenAndGetUID(config.Token, server); err != nil {
+			fmt.Printf("❌ 无效 (%v)\n", err)
+		} else {
+			fmt.Printf("✅ 有效 (UID: %s)\n", uid)
+		}
+	}
+	fmt.Println()
+
+	// 显示其他配置
+	fmt.Println("⚙️ 其他配置:")
+	modelDesc := map[int]string{0: "24小时", 1: "3天", 2: "7天", 99: "无限期"}
+	fmt.Printf("   文件有效期: %s (%d)\n", modelDesc[finalModel], finalModel)
+	fmt.Printf("   目录ID: %s\n", finalMrID)
+	fmt.Println()
+
+	// 显示当前运行参数
+	fmt.Println("🔧 当前运行参数:")
+	fmt.Printf("   分块大小: %dMB\n", finalChunkSize)
+	fmt.Printf("   跳过上传: %d (%s)\n", finalSkipUpload, map[int]string{0: "禁用秒传检查", 1: "启用秒传检查"}[finalSkipUpload])
+	
+	debugStatus := "关闭"
+	if finalDebug {
+		debugStatus = "开启"
+	}
+	fmt.Printf("   调试模式: %s\n", debugStatus)
+	fmt.Println()
+
+	// 显示使用建议
+	if config.Token == "" {
+		fmt.Println("💡 下一步建议:")
+		fmt.Println("   1. 访问 https://tmp.link/ 并登录")
+		fmt.Println("   2. 在上传界面点击'重新设定' -> '命令行上传'复制Token")
+		fmt.Println("   3. 运行: ./tmplink-cli -set-token YOUR_TOKEN")
+		fmt.Println("   4. 然后就可以上传文件了: ./tmplink-cli -file /path/to/file")
+	} else {
+		fmt.Println("✨ 配置完成，现在可以上传文件:")
+		fmt.Println("   ./tmplink-cli -file /path/to/your/file")
+	}
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // formatBytes 格式化字节数为可读格式

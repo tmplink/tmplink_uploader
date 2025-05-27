@@ -139,22 +139,6 @@ CLI模式提供类似wget/curl的进度显示：
 🔗 下载链接: https://tmp.link/f/abc123
 ```
 
-#### 批量上传
-
-```bash
-#!/bin/bash
-# 设置Token
-./tmplink-cli -set-token your_token_here
-
-# 批量上传
-FILES=("file1.txt" "file2.pdf" "file3.zip")
-for file in "${FILES[@]}"; do
-    ./tmplink-cli -file "$file" &
-done
-
-wait  # 等待所有上传完成
-```
-
 ## 参数说明
 
 ### 必需参数

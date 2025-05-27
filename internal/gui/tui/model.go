@@ -58,7 +58,7 @@ type Config struct {
 	Token            string `json:"token"`
 	UploadServer     string `json:"upload_server"`
 	SelectedServerName string `json:"selected_server_name"` // 选中的服务器名称
-	ChunkSize        int    `json:"chunk_size"`
+	ChunkSize        int    `json:"chunk_size"` // 存储MB数
 	MaxConcurrent    int    `json:"max_concurrent"`
 	QuickUpload      bool   `json:"quick_upload"`
 	SkipUpload       bool   `json:"skip_upload"`
@@ -153,7 +153,7 @@ func defaultConfig() Config {
 		Token:              "",
 		UploadServer:       "",
 		SelectedServerName: "",
-		ChunkSize:          3 * 1024 * 1024, // 3MB
+		ChunkSize:          3, // 3MB
 		MaxConcurrent:      5,
 		QuickUpload:        true,
 		SkipUpload:         false,
@@ -335,7 +335,7 @@ func NewModel(cliPath string) Model {
 	chunkSizeInput := textinput.New()
 	chunkSizeInput.Placeholder = "分块大小(MB)"
 	chunkSizeInput.Width = 20
-	chunkSizeInput.SetValue(fmt.Sprintf("%d", config.ChunkSize/(1024*1024)))
+	chunkSizeInput.SetValue(fmt.Sprintf("%d", config.ChunkSize))
 	settingsInputs["chunk_size"] = chunkSizeInput
 	
 	concurrencyInput := textinput.New()
@@ -404,8 +404,8 @@ func (m Model) Init() tea.Cmd {
 	
 	// 为恢复的上传任务启动进度监控
 	for _, task := range m.uploadTasks {
-		if task.Status == "uploading" || task.Status == "pending" {
-			cmds = append(cmds, m.checkProgress(task.ID))
+		if task.Status == "uploading" || task.Status == "pending" || task.Status == "starting" {
+			cmds = append(cmds, m.startProgressTimer(task.ID))
 		}
 	}
 	
@@ -497,6 +497,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UploadErrorMsg:
 		return m.handleUploadError(msg)
+
+	case ProcessStartedMsg:
+		return m.handleProcessStarted(msg)
+
+	case CheckProgressTickMsg:
+		return m.handleProgressTick(msg)
 	}
 
 	// 更新各组件
@@ -715,6 +721,12 @@ func (m Model) handleUploadList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		// 删除选中的上传任务
 		return m.cancelSelectedUpload()
+	case "t":
+		// 清除所有已完成任务
+		return m.clearCompletedTasks()
+	case "y":
+		// 清除所有任务
+		return m.clearAllTasks()
 	}
 
 	var cmd tea.Cmd
@@ -735,6 +747,50 @@ func (m Model) handleError(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// getFileUploadStatus 获取文件的上传状态
+func (m Model) getFileUploadStatus(filePath string) (string, bool) {
+	// 规范化文件路径以便比较
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		absPath = filePath
+	}
+	
+	for _, task := range m.uploadTasks {
+		taskAbsPath, err := filepath.Abs(task.FilePath)
+		if err != nil {
+			taskAbsPath = task.FilePath
+		}
+		
+		if taskAbsPath == absPath {
+			return task.Status, true
+		}
+	}
+	return "", false
+}
+
+// isFileUploadAllowed 检查文件是否允许上传
+func (m Model) isFileUploadAllowed(filePath string) (bool, string) {
+	status, exists := m.getFileUploadStatus(filePath)
+	if !exists {
+		return true, ""
+	}
+	
+	// 只有上传失败的文件才允许重新上传
+	if status == "failed" {
+		return true, ""
+	}
+	
+	// 其他状态都不允许重复上传
+	switch status {
+	case "starting", "pending", "uploading":
+		return false, "文件正在上传中"
+	case "completed":
+		return false, "文件已上传完成"
+	default:
+		return false, "文件已在上传列表中"
+	}
 }
 
 // handleFileSelection 处理文件选择
@@ -759,6 +815,14 @@ func (m Model) handleFileSelection() (tea.Model, tea.Cmd) {
 	} else {
 		// 选择文件进行上传
 		filePath := filepath.Join(m.currentDir, selectedFile.Name)
+		
+		// 检查文件是否允许上传
+		allowed, reason := m.isFileUploadAllowed(filePath)
+		if !allowed {
+			m.err = fmt.Errorf("%s", reason)
+			m.state = StateError
+			return m, nil
+		}
 		
 		// 验证文件大小限制 (50GB)
 		fileInfo, err := os.Stat(filePath)
@@ -793,7 +857,142 @@ func (m Model) navigateToParent() (tea.Model, tea.Cmd) {
 
 // cancelSelectedUpload 取消选中的上传任务
 func (m Model) cancelSelectedUpload() (tea.Model, tea.Cmd) {
-	// 实现取消上传逻辑
+	// 获取当前选中的任务索引
+	selectedRow := m.uploadTable.Cursor()
+	
+	// 检查是否有任务可删除
+	if selectedRow < 0 || selectedRow >= len(m.uploadTasks) {
+		return m, nil
+	}
+	
+	task := m.uploadTasks[selectedRow]
+	
+	// 如果任务正在运行，先尝试终止进程
+	if task.Status == "uploading" || task.Status == "pending" || task.Status == "starting" {
+		if task.ProcessID > 0 {
+			// 尝试终止CLI进程
+			if process, err := os.FindProcess(task.ProcessID); err == nil {
+				// 先尝试优雅终止（SIGTERM）
+				process.Signal(syscall.SIGTERM)
+				
+				// 等待短暂时间，然后强制终止
+				go func() {
+					time.Sleep(2 * time.Second)
+					if isProcessRunning(task.ProcessID) {
+						process.Kill() // 强制终止进程（SIGKILL）
+					}
+				}()
+			}
+		}
+		
+		// 更新活跃上传计数
+		m.activeUploads--
+		if m.activeUploads < 0 {
+			m.activeUploads = 0
+		}
+	}
+	
+	// 删除状态文件
+	if statusFile, exists := m.statusFiles[task.ID]; exists {
+		os.Remove(statusFile)
+		os.Remove(statusFile + ".log") // 同时删除日志文件
+		delete(m.statusFiles, task.ID)
+	}
+	
+	// 从任务列表中移除
+	if selectedRow < len(m.uploadTasks) {
+		m.uploadTasks = append(m.uploadTasks[:selectedRow], m.uploadTasks[selectedRow+1:]...)
+	}
+	
+	// 更新表格选中位置
+	if len(m.uploadTasks) > 0 && selectedRow >= len(m.uploadTasks) {
+		m.uploadTable.SetCursor(len(m.uploadTasks) - 1)
+	} else if len(m.uploadTasks) == 0 {
+		m.uploadTable.SetCursor(0)
+	}
+	
+	// 更新上传表格显示
+	m.updateUploadTable()
+	
+	return m, nil
+}
+
+// clearCompletedTasks 清除所有已完成任务
+func (m Model) clearCompletedTasks() (tea.Model, tea.Cmd) {
+	var activeTasks []TaskStatus
+	
+	// 遍历任务，只保留未完成的任务
+	for _, task := range m.uploadTasks {
+		if task.Status != "completed" && task.Status != "failed" {
+			// 保留进行中或等待中的任务
+			activeTasks = append(activeTasks, task)
+		} else {
+			// 删除已完成/失败任务的状态文件
+			if statusFile, exists := m.statusFiles[task.ID]; exists {
+				os.Remove(statusFile)
+				os.Remove(statusFile + ".log")
+				delete(m.statusFiles, task.ID)
+			}
+		}
+	}
+	
+	// 更新任务列表
+	m.uploadTasks = activeTasks
+	
+	// 重置表格选中位置
+	if len(m.uploadTasks) > 0 {
+		m.uploadTable.SetCursor(0)
+	}
+	
+	// 更新上传表格显示
+	m.updateUploadTable()
+	
+	return m, nil
+}
+
+// clearAllTasks 清除所有任务
+func (m Model) clearAllTasks() (tea.Model, tea.Cmd) {
+	// 终止所有运行中的任务
+	for _, task := range m.uploadTasks {
+		if task.Status == "uploading" || task.Status == "pending" || task.Status == "starting" {
+			if task.ProcessID > 0 {
+				// 尝试终止CLI进程
+				if process, err := os.FindProcess(task.ProcessID); err == nil {
+					// 先尝试优雅终止（SIGTERM）
+					process.Signal(syscall.SIGTERM)
+					
+					// 等待短暂时间，然后强制终止
+					go func(pid int) {
+						time.Sleep(2 * time.Second)
+						if isProcessRunning(pid) {
+							if proc, err := os.FindProcess(pid); err == nil {
+								proc.Kill() // 强制终止进程（SIGKILL）
+							}
+						}
+					}(task.ProcessID)
+				}
+			}
+		}
+		
+		// 删除状态文件
+		if statusFile, exists := m.statusFiles[task.ID]; exists {
+			os.Remove(statusFile)
+			os.Remove(statusFile + ".log")
+			delete(m.statusFiles, task.ID)
+		}
+	}
+	
+	// 清空所有任务
+	m.uploadTasks = []TaskStatus{}
+	m.statusFiles = make(map[string]string)
+	m.activeUploads = 0
+	
+	// 重置表格
+	m.uploadTable.SetCursor(0)
+	
+	// 更新上传表格显示
+	m.updateUploadTable()
+	
 	return m, nil
 }
 
@@ -811,8 +1010,8 @@ func (m Model) handleUploadProgress(msg UploadProgressMsg) (tea.Model, tea.Cmd) 
 		}
 	}
 	m.updateUploadTable()
-	// 继续监控直到完成
-	return m, m.checkProgress(msg.TaskID)
+	// 不需要继续调用 checkProgress，因为定时器会处理
+	return m, nil
 }
 
 // handleUploadComplete 处理上传完成
@@ -851,6 +1050,57 @@ func (m Model) handleUploadError(msg UploadErrorMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleProcessStarted 处理进程启动
+func (m Model) handleProcessStarted(msg ProcessStartedMsg) (tea.Model, tea.Cmd) {
+	// 更新任务状态，保存进程ID
+	for i, task := range m.uploadTasks {
+		if task.ID == msg.TaskID {
+			m.uploadTasks[i].ProcessID = msg.ProcessID
+			m.uploadTasks[i].Status = "pending"
+			m.uploadTasks[i].UpdatedAt = time.Now()
+			break
+		}
+	}
+	m.updateUploadTable()
+	
+	// 启动定时器进行进度监控
+	return m, m.startProgressTimer(msg.TaskID)
+}
+
+// handleProgressTick 处理进度检查定时器
+func (m Model) handleProgressTick(msg CheckProgressTickMsg) (tea.Model, tea.Cmd) {
+	// 检查任务是否还在运行
+	taskExists := false
+	var currentTask *TaskStatus
+	for i, task := range m.uploadTasks {
+		if task.ID == msg.TaskID {
+			currentTask = &m.uploadTasks[i]
+			if task.Status == "starting" || task.Status == "pending" || task.Status == "uploading" {
+				taskExists = true
+			}
+			break
+		}
+	}
+	
+	if !taskExists || currentTask == nil {
+		// 任务不存在或已完成，停止监控
+		return m, nil
+	}
+	
+	// 检查进程是否还在运行
+	if currentTask.ProcessID > 0 && !isProcessRunning(currentTask.ProcessID) {
+		// 进程已结束，进行最后一次状态检查
+		return m, m.checkProgress(msg.TaskID)
+	}
+	
+	// 检查进度并继续定时器
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.checkProgress(msg.TaskID))
+	cmds = append(cmds, m.startProgressTimer(msg.TaskID))
+	
+	return m, tea.Batch(cmds...)
+}
+
 // updateComponents 更新组件
 func (m Model) updateComponents(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -875,8 +1125,8 @@ func (m Model) startFileUpload(filePath string) (tea.Model, tea.Cmd) {
 	m.selectedFile = filePath
 	m.activeUploads++
 
-	// 生成任务ID
-	taskID := fmt.Sprintf("task_%d", time.Now().Unix())
+	// 生成任务ID（包含纳秒确保唯一性）
+	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
 	homeDir, _ := os.UserHomeDir()
 	statusDir := filepath.Join(homeDir, ".tmplink", "tasks")
 	os.MkdirAll(statusDir, 0755)
@@ -1102,7 +1352,7 @@ func (m Model) renderStatusBar() string {
 	case StateSettings:
 		line3 = "↑↓:选择 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
 	case StateUploadList:
-		line3 = "↑↓:选择 d:删除 Tab:文件浏览 Esc:返回 Q:退出"
+		line3 = "↑↓:选择 d:删除 t:清除完成 y:清除全部 Tab:文件浏览 Esc:返回 Q:退出"
 	case StateError:
 		line3 = "操作: Enter:重试 Esc:返回 Q:退出"
 	default:
@@ -1178,8 +1428,10 @@ func cleanupAndLoadTasks() ([]TaskStatus, map[string]string, error) {
 		shouldKeep := false
 		
 		if task.Status == "completed" || task.Status == "failed" {
-			// 已完成或失败的任务保留（但不加入监控）
+			// 已完成或失败的任务保留并加载到UI中
 			shouldKeep = true
+			validTasks = append(validTasks, task)
+			statusFiles[task.ID] = statusFile
 		} else if task.ProcessID > 0 {
 			// 检查进程是否还在运行
 			if isProcessRunning(task.ProcessID) {
@@ -1252,7 +1504,8 @@ func (m Model) renderMainView() string {
 	}
 	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("当前目录: %s\n\n", m.currentDir))
+	s.WriteString(fmt.Sprintf("当前目录: %s\n", m.currentDir))
+	s.WriteString(helpStyle.Render("📁目录 📄文件 ⏳等待 ⬆️上传中 ✅已完成\n\n"))
 	
 	// 文件列表
 	if len(m.files) == 0 {
@@ -1286,6 +1539,21 @@ func (m Model) renderMainView() string {
 			icon := "📄"
 			if file.IsDir {
 				icon = "📁"
+			} else {
+				// 检查文件上传状态并设置相应图标
+				filePath := filepath.Join(m.currentDir, file.Name)
+				status, exists := m.getFileUploadStatus(filePath)
+				if exists {
+					switch status {
+					case "starting", "pending":
+						icon = "⏳" // 等待中
+					case "uploading":
+						icon = "⬆️" // 上传中
+					case "completed":
+						icon = "✅" // 已完成
+					// "failed" 状态不添加图标，保持默认📄，允许重新上传
+					}
+				}
 			}
 			
 			// 格式化大小
@@ -1307,8 +1575,24 @@ func (m Model) renderMainView() string {
 				line += fmt.Sprintf(" (%s)", sizeStr)
 			}
 			
+			// 根据选中状态和上传状态设置颜色
 			if i == m.selectedIndex {
 				line = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line)
+			} else if !file.IsDir {
+				// 为不同上传状态的文件设置颜色
+				filePath := filepath.Join(m.currentDir, file.Name)
+				status, exists := m.getFileUploadStatus(filePath)
+				if exists {
+					switch status {
+					case "starting", "pending":
+						line = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(line) // 黄色
+					case "uploading":
+						line = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Render(line)  // 蓝色
+					case "completed":
+						line = lipgloss.NewStyle().Foreground(lipgloss.Color("40")).Render(line)  // 绿色
+					// "failed" 状态保持默认颜色
+					}
+				}
 			}
 			
 			s.WriteString(line)
@@ -1384,7 +1668,7 @@ func (m Model) renderSettings() string {
 			var value string
 			switch key {
 			case "chunk_size":
-				value = fmt.Sprintf("%d", m.config.ChunkSize/(1024*1024))
+				value = fmt.Sprintf("%d", m.config.ChunkSize)
 			case "concurrency":
 				value = fmt.Sprintf("%d", m.config.MaxConcurrent)
 			}
@@ -1494,13 +1778,16 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 			return UploadErrorMsg{Error: fmt.Sprintf("启动CLI失败: %v", err), TaskID: taskID}
 		}
 		
+		// 获取进程ID
+		processID := cmd.Process.Pid
+		
 		// 后台等待进程完成
 		go func() {
 			cmd.Wait() // 等待进程完成
 		}()
 		
-		// 立即开始监控进度，checkProgress中会处理状态文件不存在的情况
-		return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
+		// 返回进程启动消息，包含进程ID
+		return ProcessStartedMsg{TaskID: taskID, ProcessID: processID}
 	}
 }
 
@@ -1613,16 +1900,16 @@ func (m Model) checkProgress(taskID string) tea.Cmd {
 		// 读取状态文件
 		data, err := os.ReadFile(statusFile)
 		if err != nil {
-			// 文件可能还没创建，等待1秒后再次检查
-			time.Sleep(time.Second)
+			// 文件可能还没创建，返回待检查消息
 			return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
 		}
 		
 		var task TaskStatus
 		if err := json.Unmarshal(data, &task); err != nil {
-			time.Sleep(time.Second)
+			// JSON解析失败，返回待检查消息
 			return UploadProgressMsg{TaskID: taskID, Progress: 0.0, Speed: 0.0}
 		}
+		
 		
 		switch task.Status {
 		case "completed":
@@ -1630,11 +1917,17 @@ func (m Model) checkProgress(taskID string) tea.Cmd {
 		case "failed":
 			return UploadErrorMsg{Error: task.ErrorMsg, TaskID: taskID}
 		default:
-			// 延迟1秒后继续监控
-			time.Sleep(time.Second)
+			// 返回当前进度，继续监控
 			return UploadProgressMsg{TaskID: taskID, Progress: task.Progress, Speed: task.UploadSpeed}
 		}
 	}
+}
+
+// startProgressTimer 启动进度检查定时器
+func (m Model) startProgressTimer(taskID string) tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return CheckProgressTickMsg{TaskID: taskID}
+	})
 }
 
 // 消息类型
@@ -1651,6 +1944,15 @@ type UploadCompleteMsg struct {
 
 type UploadErrorMsg struct {
 	Error  string
+	TaskID string
+}
+
+type ProcessStartedMsg struct {
+	TaskID    string
+	ProcessID int
+}
+
+type CheckProgressTickMsg struct {
 	TaskID string
 }
 
@@ -1947,7 +2249,7 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 				m.state = StateError
 				return m, nil
 			}
-			m.config.ChunkSize = intValue * 1024 * 1024
+			m.config.ChunkSize = intValue
 		case "concurrency":
 			if intValue < 1 || intValue > 20 {
 				m.err = fmt.Errorf("并发数必须在 1-20 之间")
