@@ -436,8 +436,8 @@ func main() {
 
 		// CLI模式：显示失败信息
 		if cliMode {
-			fmt.Println() // 换行确保进度条完整显示
-			fmt.Printf("\n❌ 上传失败!\n")
+			clearProgressBar() // 清除进度条残留
+			fmt.Printf("❌ 上传失败!\n")
 			fmt.Printf("📁 文件名: %s\n", task.FileName)
 			fmt.Printf("❗ 错误信息: %v\n", err)
 		} else {
@@ -461,12 +461,11 @@ func main() {
 
 	// CLI模式：显示完成信息
 	if cliMode {
-		fmt.Println() // 换行确保进度条完整显示
-		fmt.Printf("\n✅ 上传完成!\n")
+		clearProgressBar() // 清除进度条残留
+		fmt.Printf("✅ 上传完成!\n")
 		fmt.Printf("📁 文件名: %s\n", task.FileName)
 		fmt.Printf("📊 文件大小: %s\n", formatBytes(fileInfo.Size()))
-		fmt.Printf("⚡ 平均速度: %.2f MB/s\n", task.UploadSpeed)
-
+		fmt.Printf("⚡ 平均速度: %.2f MB/s\n", task.UploadSpeed/1024) // 转换为MB/s
 		duration := time.Since(speedCalc.startTime)
 		fmt.Printf("⏱️  总耗时: %v\n", duration.Round(time.Second))
 		fmt.Printf("🔗 下载链接: %s\n", result.DownloadURL)
@@ -1679,35 +1678,23 @@ func getDownloadURL(ctx context.Context, client *http.Client, config *Config, sh
 	return "", fmt.Errorf("获取下载链接失败，状态码: %d", completeResp.Status)
 }
 
+// clearProgressBar 清除进度条残留和开始信息
+func clearProgressBar() {
+	// 清除我们输出的内容：进度条 + 文件大小行 + 开始上传行（共3行）
+	fmt.Print("\r\033[K")     // 清除当前行（进度条）
+	fmt.Print("\033[1A\033[K") // 向上移动一行并清除（文件大小行）
+	fmt.Print("\033[1A\033[K") // 向上移动一行并清除（开始上传行）
+	// 现在光标在开始上传行的位置，准备输出完成信息
+}
+
 // createProgressCallback 创建进度回调函数
 func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalculator, task *TaskStatus, statusFile string) func(int64, int64) {
 	var bar *progressbar.ProgressBar
 
-	// 如果是CLI模式，创建进度条
+	// 如果是CLI模式，只显示开始信息，不立即创建进度条
 	if cliMode {
-		bar = progressbar.NewOptions64(
-			fileSize,
-			progressbar.OptionSetDescription("📤 上传中"),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionSetTheme(progressbar.Theme{
-				Saucer:        "█",
-				SaucerHead:    "█",
-				SaucerPadding: "░",
-				BarStart:      "[",
-				BarEnd:        "]",
-			}),
-			progressbar.OptionShowIts(),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetPredictTime(true),
-			progressbar.OptionShowDescriptionAtLineEnd(),
-			progressbar.OptionSetRenderBlankState(true),
-			progressbar.OptionClearOnFinish(),
-		)
-
 		fmt.Printf("🚀 开始上传文件: %s\n", task.FileName)
 		fmt.Printf("📊 文件大小: %s\n", formatBytes(fileSize))
-		fmt.Println()
 	}
 
 	return func(uploaded, total int64) {
@@ -1722,8 +1709,29 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 		task.UploadSpeed = speed
 		task.UpdatedAt = time.Now()
 
-		// CLI模式：更新进度条
-		if cliMode && bar != nil {
+		// CLI模式：惰性创建和更新进度条
+		if cliMode {
+			// 只在第一次调用时创建进度条
+			if bar == nil {
+				bar = progressbar.NewOptions64(
+					total,
+					progressbar.OptionSetDescription("📤 上传中"),
+					progressbar.OptionSetWidth(40),
+					progressbar.OptionShowBytes(true),
+					progressbar.OptionSetTheme(progressbar.Theme{
+						Saucer:        "█",
+						SaucerHead:    "█",
+						SaucerPadding: "░",
+						BarStart:      "[",
+						BarEnd:        "]",
+					}),
+					progressbar.OptionShowIts(),
+					progressbar.OptionShowCount(),
+					progressbar.OptionSetPredictTime(true),
+					progressbar.OptionShowDescriptionAtLineEnd(),
+					// 移除 OptionSetRenderBlankState 防止立即显示空进度条
+				)
+			}
 			bar.Set64(uploaded)
 		}
 
