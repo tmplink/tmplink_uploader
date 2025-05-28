@@ -20,17 +20,17 @@
 
 Linux 系统：
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install-linux.sh | bash
 ```
 
 macOS 系统：
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install-macos.sh | bash
 ```
 
 Windows 系统（PowerShell 管理员模式）：
 ```powershell
-iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install.ps1'))
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install-windows.ps1'))
 ```
 
 **方式二：下载后安装**
