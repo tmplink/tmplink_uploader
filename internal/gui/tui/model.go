@@ -1507,7 +1507,7 @@ func (m Model) renderMainView() string {
 	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n")
 	s.WriteString(fmt.Sprintf("当前目录: %s\n", m.currentDir))
-	s.WriteString(helpStyle.Render("📁目录 📄文件 ⏳等待 ⬆️上传中 ✅已完成\n\n"))
+	s.WriteString(helpStyle.Render("📁目录 📄文件 🟡等待 🔵上传中 🟢已完成 🔴失败\n\n"))
 	
 	// 文件列表
 	if len(m.files) == 0 {
@@ -1544,24 +1544,33 @@ func (m Model) renderMainView() string {
 				prefix = "> "
 			}
 			
-			// 文件/目录图标
-			icon := "📄"
+			// 文件/目录图标和状态圆点
+			var icon string
+			var statusDot string
+			
 			if file.IsDir {
 				icon = "📁"
+				statusDot = ""
 			} else {
-				// 检查文件上传状态并设置相应图标
+				icon = "📄"
+				// 检查文件上传状态并设置相应的状态圆点
 				filePath := filepath.Join(m.currentDir, file.Name)
 				status, exists := m.getFileUploadStatus(filePath)
 				if exists {
 					switch status {
 					case "starting", "pending":
-						icon = "⏳" // 等待中
+						statusDot = " 🟡" // 黄色圆点：等待中
 					case "uploading":
-						icon = "⬆️" // 上传中
+						statusDot = " 🔵" // 蓝色圆点：上传中
 					case "completed":
-						icon = "✅" // 已完成
-					// "failed" 状态不添加图标，保持默认📄，允许重新上传
+						statusDot = " 🟢" // 绿色圆点：已完成
+					case "failed":
+						statusDot = " 🔴" // 红色圆点：上传失败
+					default:
+						statusDot = ""
 					}
+				} else {
+					statusDot = ""
 				}
 			}
 			
@@ -1579,29 +1588,14 @@ func (m Model) renderMainView() string {
 				}
 			}
 			
-			line := fmt.Sprintf("%s%s %s", prefix, icon, file.Name)
+			line := fmt.Sprintf("%s%s %s%s", prefix, icon, file.Name, statusDot)
 			if sizeStr != "" {
 				line += fmt.Sprintf(" (%s)", sizeStr)
 			}
 			
-			// 根据选中状态和上传状态设置颜色
+			// 根据选中状态设置颜色
 			if i == m.selectedIndex {
 				line = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line)
-			} else if !file.IsDir {
-				// 为不同上传状态的文件设置颜色
-				filePath := filepath.Join(m.currentDir, file.Name)
-				status, exists := m.getFileUploadStatus(filePath)
-				if exists {
-					switch status {
-					case "starting", "pending":
-						line = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(line) // 黄色
-					case "uploading":
-						line = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Render(line)  // 蓝色
-					case "completed":
-						line = lipgloss.NewStyle().Foreground(lipgloss.Color("40")).Render(line)  // 绿色
-					// "failed" 状态保持默认颜色
-					}
-				}
 			}
 			
 			s.WriteString(line)
