@@ -374,7 +374,7 @@ func NewModel(cliPath string) Model {
 		viewport:      vp,
 		currentDir:     currentDir,
 		files:          []FileInfo{},
-		selectedIndex:    0,
+		selectedIndex:    1, // 跳过占位符，从第一个真实条目开始
 		showHidden:       false, // 默认不显示隐藏文件
 		settingsIndex:    initialSettingsIndex,
 		settingsInputs:   settingsInputs,
@@ -573,13 +573,15 @@ func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.handleFileSelection()
 	case "up":
-		if m.selectedIndex > 0 {
+		if m.selectedIndex > 1 { // 跳过第一个占位符条目
 			m.selectedIndex--
 		}
 		return m, nil
 	case "down":
 		if m.selectedIndex < len(m.files)-1 {
 			m.selectedIndex++
+		} else if m.selectedIndex == 0 { // 如果在占位符上，移动到第一个真实条目
+			m.selectedIndex = 1
 		}
 		return m, nil
 	case "left":
@@ -591,7 +593,7 @@ func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		// 切换显示隐藏文件
 		m.showHidden = !m.showHidden
-		m.selectedIndex = 0 // 重置选择索引
+		m.selectedIndex = 1 // 重置选择索引，跳过占位符
 		return m, m.loadFiles()
 	}
 
@@ -809,7 +811,7 @@ func (m Model) handleFileSelection() (tea.Model, tea.Cmd) {
 			// 进入目录
 			newDir := filepath.Join(m.currentDir, selectedFile.Name)
 			m.currentDir = newDir
-			m.selectedIndex = 0
+			m.selectedIndex = 1
 			return m, m.loadFiles()
 		}
 	} else {
@@ -849,7 +851,7 @@ func (m Model) navigateToParent() (tea.Model, tea.Cmd) {
 	parentDir := filepath.Dir(m.currentDir)
 	if parentDir != m.currentDir { // 确保不是根目录
 		m.currentDir = parentDir
-		m.selectedIndex = 0
+		m.selectedIndex = 1
 		return m, m.loadFiles()
 	}
 	return m, nil
@@ -1513,8 +1515,8 @@ func (m Model) renderMainView() string {
 	} else {
 		// 显示文件列表
 		maxHeight := m.height - 10 // 为三行状态栏和标题留空间
-		if maxHeight < 5 {
-			maxHeight = 5
+		if maxHeight < 5 || m.height == 0 {
+			maxHeight = 10 // 为未初始化的终端提供合理的默认值
 		}
 		
 		startIndex := 0
@@ -1529,6 +1531,13 @@ func (m Model) renderMainView() string {
 		
 		for i := startIndex; i < endIndex; i++ {
 			file := m.files[i]
+			
+			// 跳过空的占位符条目（第一个条目）
+			if file.Name == "" {
+				s.WriteString("\n") // 输出空行
+				continue
+			}
+			
 			prefix := "  "
 			
 			if i == m.selectedIndex {
@@ -2164,6 +2173,12 @@ func loadDirectoryFiles(dirPath string, showHidden bool) ([]FileInfo, error) {
 	}
 	
 	var files []FileInfo
+	
+	// 添加空的占位符条目作为第一个条目（解决居中显示问题）
+	files = append(files, FileInfo{
+		Name:  "", // 空名称，在渲染时会被跳过
+		IsDir: false,
+	})
 	
 	// 添加返回上级目录选项（除非已在根目录）
 	if dirPath != "/" && dirPath != filepath.VolumeName(dirPath) {
