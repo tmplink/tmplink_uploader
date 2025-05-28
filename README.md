@@ -12,25 +12,75 @@
 
 ## 🚀 快速开始
 
-### 第一步：下载程序
+### 安装方式
 
-从 [build](build/) 目录下载适合你系统的版本：
+#### 📦 一键安装（推荐）
+
+**方式一：在线安装脚本**
+
+Linux 系统：
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install.sh | bash
+```
+
+macOS 系统：
+```bash
+curl -fsSL https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install.sh | bash
+```
+
+Windows 系统（PowerShell 管理员模式）：
+```powershell
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/install.ps1'))
+```
+
+**方式二：下载后安装**
+
+下载项目：
+```bash
+git clone https://github.com/tmplink/tmplink_uploader.git
+cd tmplink_uploader
+```
+
+Linux 系统：
+```bash
+./install-linux.sh
+```
+
+macOS 系统：
+```bash
+./install-macos.sh
+```
+
+Windows 系统：
+```powershell
+.\install-windows.ps1
+```
+
+安装完成后，命令 `tmplink` 和 `tmplink-cli` 将可在任何位置使用。
+
+#### 💾 手动下载
+
+如果不想使用安装脚本，可从 [build](build/) 目录下载预编译版本：
 
 - **Windows**: `windows-64bit` 或 `windows-32bit`
 - **macOS**: `macos-arm64` (M1/M2) 或 `macos-intel`
 - **Linux**: `linux-64bit`、`linux-32bit` 或 `linux-arm64`
 
-### 第二步：获取访问令牌
+### 获取访问令牌
 
 1. 打开 [钛盘网站](https://tmp.link/) 并登录
 2. 点击上传文件，然后点击"重新设定"
 3. 在"命令行上传"界面复制你的 Token
 
-### 第三步：开始使用
+### 开始使用
 
 #### 🖥️ 图形界面（推荐新手）
 
 ```bash
+# 如果使用了安装脚本，直接运行：
+tmplink
+
+# 如果手动下载，需要指定路径：
 # Windows
 tmplink.exe
 
@@ -43,10 +93,15 @@ tmplink.exe
 #### ⌨️ 命令行（适合进阶用户）
 
 ```bash
+# 如果使用了安装脚本：
 # 保存 Token（只需一次）
-./tmplink-cli -set-token 你的TOKEN
+tmplink-cli -set-token 你的TOKEN
 
 # 上传文件
+tmplink-cli -file 文件路径
+
+# 如果手动下载，需要指定路径：
+./tmplink-cli -set-token 你的TOKEN
 ./tmplink-cli -file 文件路径
 ```
 
@@ -63,16 +118,16 @@ tmplink.exe
 
 ```bash
 # 上传单个文件
-./tmplink-cli -file ~/Documents/report.pdf
+tmplink-cli -file ~/Documents/report.pdf
 
 # 大文件上传（使用更大分块）
-./tmplink-cli -file ~/Videos/movie.mp4 -chunk-size 10
+tmplink-cli -file ~/Videos/movie.mp4 -chunk-size 10
 
 # 永久保存重要文件
-./tmplink-cli -file ~/backup.zip -model 99
+tmplink-cli -file ~/backup.zip -model 99
 
 # 临时使用其他 Token
-./tmplink-cli -file test.txt -token 临时TOKEN
+tmplink-cli -file test.txt -token 临时TOKEN
 ```
 
 ## ⚙️ 参数说明
@@ -109,7 +164,7 @@ chmod +x tmplink tmplink-cli
 3. 使用 `-debug` 参数查看详细错误
 
 ```bash
-./tmplink-cli -debug -file test.txt
+tmplink-cli -debug -file test.txt
 ```
 
 ## 📚 了解更多
@@ -124,10 +179,10 @@ chmod +x tmplink tmplink-cli
 
 ```bash
 # 查看所有命令参数
-./tmplink-cli -h
+tmplink-cli -h
 
 # 启用详细日志
-./tmplink-cli -debug -file yourfile.txt
+tmplink-cli -debug -file yourfile.txt
 ```
 
 还有问题？[提交 Issue](https://github.com/tmplink/tmplink_uploader/issues) 或查看[详细文档](docs/)。
