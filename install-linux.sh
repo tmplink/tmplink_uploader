@@ -5,9 +5,9 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
-BUILD_DIR="$SCRIPT_DIR/build"
+GITHUB_REPO="tmplink/tmplink_uploader"
+DOWNLOAD_BASE="https://raw.githubusercontent.com/$GITHUB_REPO/main/build"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -57,19 +57,6 @@ check_requirements() {
         print_info "未知 Linux 发行版"
     fi
     
-    # 检查 Go 是否安装
-    if ! command -v go &> /dev/null; then
-        print_error "Go 未安装，请先安装 Go"
-        print_info "Ubuntu/Debian: sudo apt install golang-go"
-        print_info "CentOS/RHEL: sudo yum install golang"
-        print_info "Fedora: sudo dnf install golang"
-        print_info "Arch: sudo pacman -S go"
-        print_info "或访问: https://golang.org/dl/"
-        exit 1
-    fi
-    
-    print_info "Go 版本: $(go version)"
-    
     # 检查是否有写入权限（或者可以 sudo）
     if [[ ! -w "$INSTALL_DIR" ]] && ! sudo -n true 2>/dev/null; then
         print_info "需要管理员权限来安装到 $INSTALL_DIR"
@@ -83,15 +70,15 @@ check_requirements() {
     
     # 检查必要的工具
     local missing_tools=()
-    for tool in make tar gzip; do
+    for tool in curl wget; do
         if ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
     done
     
-    if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        print_error "缺少必要的工具: ${missing_tools[*]}"
-        print_info "请使用包管理器安装这些工具"
+    if [[ ${#missing_tools[@]} -eq 2 ]]; then
+        print_error "需要 curl 或 wget 来下载文件"
+        print_info "请使用包管理器安装其中一个工具"
         exit 1
     fi
     
@@ -128,49 +115,63 @@ detect_architecture() {
     esac
 }
 
-build_binaries() {
-    print_step "构建程序..."
+download_binaries() {
+    print_step "下载二进制文件..."
     
-    cd "$SCRIPT_DIR"
+    local temp_dir=$(mktemp -d)
+    local gui_binary="tmplink"
+    local cli_binary="tmplink-cli"
     
-    # 安装依赖
-    print_info "安装 Go 依赖..."
-    go mod download
-    go mod tidy
-    
-    # 构建发布版本
-    print_info "构建 Linux 版本..."
-    make build-release
-    
-    if [[ ! -d "$BUILD_DIR/$ARCH_DIR" ]]; then
-        print_error "构建失败，找不到目标目录: $BUILD_DIR/$ARCH_DIR"
+    # 选择下载工具
+    local download_cmd=""
+    if command -v curl &> /dev/null; then
+        download_cmd="curl -fsSL"
+    elif command -v wget &> /dev/null; then
+        download_cmd="wget -q -O -"
+    else
+        print_error "找不到 curl 或 wget"
         exit 1
     fi
     
-    print_success "程序构建完成"
+    print_info "下载 $gui_binary..."
+    if ! $download_cmd "$DOWNLOAD_BASE/$ARCH_DIR/$gui_binary" > "$temp_dir/$gui_binary"; then
+        print_error "下载 $gui_binary 失败"
+        rm -rf "$temp_dir"
+        exit 1
+    fi
+    
+    print_info "下载 $cli_binary..."
+    if ! $download_cmd "$DOWNLOAD_BASE/$ARCH_DIR/$cli_binary" > "$temp_dir/$cli_binary"; then
+        print_error "下载 $cli_binary 失败"
+        rm -rf "$temp_dir"
+        exit 1
+    fi
+    
+    # 验证文件
+    if [[ ! -s "$temp_dir/$gui_binary" ]] || [[ ! -s "$temp_dir/$cli_binary" ]]; then
+        print_error "下载的文件无效"
+        rm -rf "$temp_dir"
+        exit 1
+    fi
+    
+    TEMP_DIR="$temp_dir"
+    print_success "二进制文件下载完成"
 }
 
 install_binaries() {
     print_step "安装程序到系统..."
     
-    local source_dir="$BUILD_DIR/$ARCH_DIR"
     local gui_binary="tmplink"
     local cli_binary="tmplink-cli"
     
-    # 检查二进制文件是否存在
-    if [[ ! -f "$source_dir/$gui_binary" ]] || [[ ! -f "$source_dir/$cli_binary" ]]; then
-        print_error "二进制文件不存在，请检查构建过程"
-        exit 1
-    fi
-    
     # 安装二进制文件
-    print_info "复制 $gui_binary 到 $INSTALL_DIR..."
+    print_info "安装 $gui_binary 到 $INSTALL_DIR..."
     if [[ -w "$INSTALL_DIR" ]]; then
-        cp "$source_dir/$gui_binary" "$INSTALL_DIR/"
-        cp "$source_dir/$cli_binary" "$INSTALL_DIR/"
+        cp "$TEMP_DIR/$gui_binary" "$INSTALL_DIR/"
+        cp "$TEMP_DIR/$cli_binary" "$INSTALL_DIR/"
     else
-        sudo cp "$source_dir/$gui_binary" "$INSTALL_DIR/"
-        sudo cp "$source_dir/$cli_binary" "$INSTALL_DIR/"
+        sudo cp "$TEMP_DIR/$gui_binary" "$INSTALL_DIR/"
+        sudo cp "$TEMP_DIR/$cli_binary" "$INSTALL_DIR/"
     fi
     
     # 设置执行权限
@@ -220,8 +221,8 @@ verify_installation() {
     
     if command -v tmplink &> /dev/null && command -v tmplink-cli &> /dev/null; then
         print_success "安装验证成功"
-        print_info "GUI 程序版本: $(tmplink --version 2>/dev/null || echo '可用')"
-        print_info "CLI 程序版本: $(tmplink-cli --version 2>/dev/null || echo '可用')"
+        print_info "GUI 程序: $(which tmplink)"
+        print_info "CLI 程序: $(which tmplink-cli)"
     else
         print_error "安装验证失败，请检查 PATH 环境变量"
         print_info "您可能需要重新加载 shell 配置或重新登录"
@@ -286,8 +287,7 @@ show_usage() {
     echo "  ~/.local/share/applications/tmplink.desktop"
     echo
     echo "更多信息请查看："
-    echo "  README.md"
-    echo "  docs/usage.md"
+    echo "  https://github.com/$GITHUB_REPO"
     echo
     
     # 显示特定发行版的额外信息
@@ -311,7 +311,9 @@ show_usage() {
 
 cleanup() {
     print_step "清理临时文件..."
-    # 这里可以添加清理逻辑，如果需要的话
+    if [[ -n "$TEMP_DIR" ]] && [[ -d "$TEMP_DIR" ]]; then
+        rm -rf "$TEMP_DIR"
+    fi
     print_success "清理完成"
 }
 
@@ -320,7 +322,7 @@ main() {
     
     check_requirements
     detect_architecture
-    build_binaries
+    download_binaries
     install_binaries
     create_desktop_entry
     setup_environment
@@ -334,7 +336,7 @@ main() {
 }
 
 # 捕获中断信号
-trap 'print_error "安装被中断"; exit 1' INT TERM
+trap 'print_error "安装被中断"; cleanup; exit 1' INT TERM
 
 # 运行主函数
 main "$@"

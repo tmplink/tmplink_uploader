@@ -12,9 +12,9 @@ param(
 # 设置错误处理
 $ErrorActionPreference = "Stop"
 
-# 脚本目录
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$BuildDir = Join-Path $ScriptDir "build"
+# 脚本参数
+$GitHubRepo = "tmplink/tmplink_uploader"
+$DownloadBase = "https://raw.githubusercontent.com/$GitHubRepo/main/build"
 
 # 颜色函数
 function Write-Header {
@@ -64,20 +64,6 @@ function Test-Requirements {
     $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
     Write-Info "检测到系统: $($osInfo.Caption) $($osInfo.Version)"
     
-    # 检查 Go 是否安装
-    try {
-        $goVersion = go version 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Info "Go 版本: $goVersion"
-        } else {
-            throw "Go not found"
-        }
-    } catch {
-        Write-Error "Go 未安装，请先安装 Go"
-        Write-Info "请访问 https://golang.org/dl/ 下载并安装 Go"
-        exit 1
-    }
-    
     # 检查管理员权限
     if (-not (Test-Administrator)) {
         if (-not $Force) {
@@ -90,30 +76,6 @@ function Test-Requirements {
         }
         Write-Info "将以当前用户权限继续安装"
         $script:InstallPath = "$env:LOCALAPPDATA\Programs\TmpLink"
-    }
-    
-    # 检查必要的工具
-    $missingTools = @()
-    $tools = @("make")
-    
-    foreach ($tool in $tools) {
-        try {
-            & $tool --version 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                $missingTools += $tool
-            }
-        } catch {
-            $missingTools += $tool
-        }
-    }
-    
-    if ($missingTools.Count -gt 0) {
-        Write-Error "缺少必要的工具: $($missingTools -join ', ')"
-        Write-Info "请安装这些工具，推荐使用以下方式之一："
-        Write-Info "  - 安装 Git for Windows (包含 make)"
-        Write-Info "  - 安装 chocolatey: choco install make"
-        Write-Info "  - 安装 MSYS2 或 MinGW"
-        exit 1
     }
     
     Write-Success "系统要求检查通过"
@@ -140,40 +102,52 @@ function Get-Architecture {
     }
 }
 
-function Build-Binaries {
-    Write-Step "构建程序..."
+function Download-Binaries {
+    Write-Step "下载二进制文件..."
     
-    Set-Location $ScriptDir
+    $tempDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
+    $script:TempDir = $tempDir.FullName
     
-    # 安装依赖
-    Write-Info "安装 Go 依赖..."
-    go mod download
-    go mod tidy
+    $guiBinary = "tmplink.exe"
+    $cliBinary = "tmplink-cli.exe"
     
-    # 构建发布版本
-    Write-Info "构建 Windows 版本..."
-    make build-release
-    
-    if (-not (Test-Path "$BuildDir\$ArchDir")) {
-        Write-Error "构建失败，找不到目标目录: $BuildDir\$ArchDir"
+    try {
+        Write-Info "下载 $guiBinary..."
+        $guiUrl = "$DownloadBase/$ArchDir/$guiBinary"
+        $guiPath = Join-Path $TempDir $guiBinary
+        Invoke-WebRequest -Uri $guiUrl -OutFile $guiPath -UseBasicParsing
+        
+        Write-Info "下载 $cliBinary..."
+        $cliUrl = "$DownloadBase/$ArchDir/$cliBinary"
+        $cliPath = Join-Path $TempDir $cliBinary
+        Invoke-WebRequest -Uri $cliUrl -OutFile $cliPath -UseBasicParsing
+        
+        # 验证文件
+        if (-not (Test-Path $guiPath) -or -not (Test-Path $cliPath)) {
+            throw "下载的文件不存在"
+        }
+        
+        if ((Get-Item $guiPath).Length -eq 0 -or (Get-Item $cliPath).Length -eq 0) {
+            throw "下载的文件无效"
+        }
+        
+        Write-Success "二进制文件下载完成"
+    } catch {
+        Write-Error "下载失败: $($_.Exception.Message)"
+        if (Test-Path $TempDir) {
+            Remove-Item -Path $TempDir -Recurse -Force
+        }
         exit 1
     }
-    
-    Write-Success "程序构建完成"
 }
 
 function Install-Binaries {
     Write-Step "安装程序到系统..."
     
-    $sourceDir = Join-Path $BuildDir $ArchDir
     $guiBinary = "tmplink.exe"
     $cliBinary = "tmplink-cli.exe"
-    
-    # 检查二进制文件是否存在
-    if (-not (Test-Path "$sourceDir\$guiBinary") -or -not (Test-Path "$sourceDir\$cliBinary")) {
-        Write-Error "二进制文件不存在，请检查构建过程"
-        exit 1
-    }
+    $guiSource = Join-Path $TempDir $guiBinary
+    $cliSource = Join-Path $TempDir $cliBinary
     
     # 创建安装目录
     if (-not (Test-Path $InstallPath)) {
@@ -182,9 +156,20 @@ function Install-Binaries {
     }
     
     # 安装二进制文件
-    Write-Info "复制 $guiBinary 到 $InstallPath..."
-    Copy-Item "$sourceDir\$guiBinary" $InstallPath -Force
-    Copy-Item "$sourceDir\$cliBinary" $InstallPath -Force
+    Write-Info "安装 $guiBinary 到 $InstallPath..."
+    Copy-Item $guiSource $InstallPath -Force
+    Copy-Item $cliSource $InstallPath -Force
+    
+    # 移除 Windows Defender 的 Mark of the Web
+    $guiPath = Join-Path $InstallPath $guiBinary
+    $cliPath = Join-Path $InstallPath $cliBinary
+    
+    try {
+        Unblock-File -Path $guiPath -ErrorAction SilentlyContinue
+        Unblock-File -Path $cliPath -ErrorAction SilentlyContinue
+    } catch {
+        # 忽略错误，某些系统可能不支持
+    }
     
     # 设置环境变量
     if (-not $NoPath) {
@@ -210,6 +195,23 @@ function Set-EnvironmentPath {
         Write-Success "PATH 环境变量已更新"
     } else {
         Write-Info "PATH 中已包含安装目录"
+    }
+}
+
+function Add-WindowsDefenderExclusion {
+    Write-Step "配置 Windows Defender 排除..."
+    
+    try {
+        if (Test-Administrator) {
+            # 添加安装目录到 Windows Defender 排除列表
+            Add-MpPreference -ExclusionPath $InstallPath -ErrorAction Stop
+            Write-Success "已添加 Windows Defender 排除规则"
+        } else {
+            Write-Info "需要管理员权限来配置 Windows Defender 排除"
+            Write-Info "如果遇到误报，请手动添加 $InstallPath 到 Windows Defender 排除列表"
+        }
+    } catch {
+        Write-Info "无法自动配置 Windows Defender，请手动添加排除规则"
     }
 }
 
@@ -272,6 +274,8 @@ function Test-Installation {
     
     if ((Test-Path $guiPath) -and (Test-Path $cliPath)) {
         Write-Success "安装验证成功"
+        Write-Info "GUI 程序: $guiPath"
+        Write-Info "CLI 程序: $cliPath"
         
         # 尝试获取版本信息
         try {
@@ -319,6 +323,14 @@ Remove-Item -Path "$([Environment]::GetFolderPath('Desktop'))\钛盘上传工具
 `$newPath = `$newPath -replace ";;", ";"
 [Environment]::SetEnvironmentVariable("Path", `$newPath, "User")
 
+# 移除 Windows Defender 排除规则（需要管理员权限）
+try {
+    Remove-MpPreference -ExclusionPath "$InstallPath" -ErrorAction Stop
+    Write-Host "已移除 Windows Defender 排除规则" -ForegroundColor Green
+} catch {
+    Write-Host "无法移除 Windows Defender 排除规则，请手动移除" -ForegroundColor Yellow
+}
+
 Write-Host "钛盘上传工具已卸载" -ForegroundColor Green
 "@
     
@@ -352,21 +364,22 @@ function Show-Usage {
     Write-Host "  运行: $InstallPath\uninstall.ps1" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "更多信息请查看：" -ForegroundColor White
-    Write-Host "  README.md" -ForegroundColor Cyan
-    Write-Host "  docs\usage.md" -ForegroundColor Cyan
+    Write-Host "  https://github.com/$GitHubRepo" -ForegroundColor Cyan
     Write-Host ""
     
     # Windows 特定提示
     Write-Host "Windows 用户提示：" -ForegroundColor Yellow
     Write-Host "  - 如果防火墙弹出提示，请允许程序访问网络" -ForegroundColor White
-    Write-Host "  - 如果 Windows Defender 误报，请添加到白名单" -ForegroundColor White
+    Write-Host "  - 如果 Windows Defender 误报，已自动添加到白名单" -ForegroundColor White
     Write-Host "  - 重启命令提示符或 PowerShell 以使用命令行版本" -ForegroundColor White
     Write-Host ""
 }
 
 function Invoke-Cleanup {
     Write-Step "清理临时文件..."
-    # 这里可以添加清理逻辑，如果需要的话
+    if ($script:TempDir -and (Test-Path $script:TempDir)) {
+        Remove-Item -Path $script:TempDir -Recurse -Force
+    }
     Write-Success "清理完成"
 }
 
@@ -376,8 +389,9 @@ function Main {
     try {
         Test-Requirements
         Get-Architecture
-        Build-Binaries
+        Download-Binaries
         Install-Binaries
+        Add-WindowsDefenderExclusion
         Create-StartMenuShortcut
         Create-DesktopShortcut
         Create-UninstallInfo
