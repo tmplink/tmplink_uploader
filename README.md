@@ -1,242 +1,141 @@
-# 钛盘文件上传工具
+# 钛盘上传工具 🚀
 
-一个用于 [钛盘](https://tmp.link/) 的高效文件上传工具，支持分块上传、断点续传和实时进度监控。
+简单易用的 [钛盘](https://tmp.link/) 文件上传工具，支持大文件、断点续传、批量上传。
 
-## 项目介绍
+## ✨ 特色功能
 
-本工具提供图形界面(GUI)和命令行(CLI)两种使用方式：
+- 🎯 **一键上传** - 支持最大 50GB
+- ⚡ **超快速度** - 分块上传 + 多线程，充分利用网络带宽
+- 🔄 **断点续传** - 网络中断自动恢复，大文件上传无忧
+- 📱 **双界面** - 图形界面日常使用，命令行脚本自动化
+- 💎 **会员功能** - 赞助用户享受更多高级设置
 
-- **tmplink** (GUI): 终端图形界面，适合日常文件上传
-- **tmplink-cli** (CLI): 命令行工具，适合脚本自动化和批量操作
+## 🚀 快速开始
 
-### 主要特性
+### 第一步：下载程序
 
-- ✅ **分块上传**: 大文件自动分块，支持1-99MB分块大小
-- ✅ **断点续传**: 基于SHA1的文件去重和秒传
-- ✅ **实时监控**: 上传进度和速度实时显示
-- ✅ **并发上传**: 多线程并发，提高传输效率
-- ✅ **权限分级**: 支持普通用户和赞助用户不同功能
-- ✅ **文件大小限制**: 支持最大50GB单文件上传
+从 [build](build/) 目录下载适合你系统的版本：
 
-## 安装
+- **Windows**: `windows-64bit` 或 `windows-32bit`
+- **macOS**: `macos-arm64` (M1/M2) 或 `macos-intel`
+- **Linux**: `linux-64bit`、`linux-32bit` 或 `linux-arm64`
 
-### 方式一：下载预编译版本 (推荐)
+### 第二步：获取访问令牌
 
-从项目的 `build` 目录下载对应平台的预编译版本：
+1. 打开 [钛盘网站](https://tmp.link/) 并登录
+2. 点击上传文件，然后点击"重新设定"
+3. 在"命令行上传"界面复制你的 Token
 
-| 平台 | 架构 | 目录 |
-|------|------|------|
-| macOS | Intel | `macos-intel/` |
-| macOS | Apple Silicon | `macos-arm64/` |
-| Windows | 64位 | `windows-64bit/` |
-| Windows | 32位 | `windows-32bit/` |
-| Linux | x86_64 | `linux-64bit/` |
-| Linux | i386 | `linux-32bit/` |
-| Linux | ARM64 | `linux-arm64/` |
+### 第三步：开始使用
 
-**安装步骤：**
+#### 🖥️ 图形界面（推荐新手）
 
 ```bash
-# 1. 进入对应平台目录 (如 build/macos-arm64/)
-# 2. 设置执行权限 (macOS/Linux)
-chmod +x tmplink tmplink-cli
+# Windows
+tmplink.exe
 
-# 3. 运行程序
-./tmplink        # GUI模式
-./tmplink-cli    # CLI模式
-```
-
-### 方式二：从源码编译
-
-```bash
-# 克隆仓库
-git clone https://github.com/tmplink/tmplink_uploader.git
-cd tmplink_uploader
-
-# 编译
-make build        # 编译当前平台
-make release      # 编译所有平台
-```
-
-## 使用方法
-
-### 获取API Token
-
-使用前需要获取钛盘API Token：
-
-1. 访问 [钛盘](https://tmp.link/) 并登录
-2. 点开上传文件，然后点击 "重新设定"，然后在 "命令行上传" 界面复制 Token
-
-### GUI模式使用
-
-适合日常文件上传，提供友好的交互界面：
-
-```bash
-# 启动GUI
+# macOS/Linux
 ./tmplink
-
-# 首次使用会提示输入API Token
-# 然后可以通过界面选择文件并上传
 ```
 
-**主要功能：**
-- 📁 文件浏览和选择
-- 📊 实时上传进度和速度显示  
-- ⚙️ 上传参数配置（赞助用户）
-- 🔄 多文件并发上传
-- 📋 上传历史记录
+首次启动会要求输入 Token，之后就能通过界面选择文件上传了。
 
-### CLI模式使用
-
-#### 基本用法
+#### ⌨️ 命令行（适合进阶用户）
 
 ```bash
-# 首次使用 - 设置Token
-./tmplink-cli -set-token YOUR_API_TOKEN
+# 保存 Token（只需一次）
+./tmplink-cli -set-token 你的TOKEN
 
-# 上传文件 - 自动显示进度条
-./tmplink-cli -file /path/to/file.txt
+# 上传文件
+./tmplink-cli -file 文件路径
 ```
 
-#### 常用示例
+## 📖 使用示例
+
+### 图形界面操作
+
+启动后按方向键导航：
+- **选择文件** → 浏览并选择要上传的文件
+- **开始上传** → 实时查看上传进度和速度
+- **查看结果** → 获取下载链接并复制
+
+### 命令行常用操作
 
 ```bash
-# 大文件上传（调整分块大小）
-./tmplink-cli -file ./large-video.mp4 -chunk-size 10
+# 上传单个文件
+./tmplink-cli -file ~/Documents/report.pdf
 
-# 无限期保存文件
-./tmplink-cli -file ./important.zip -model 99
+# 大文件上传（使用更大分块）
+./tmplink-cli -file ~/Videos/movie.mp4 -chunk-size 10
 
-# 指定上传服务器
-./tmplink-cli -file ./file.txt -upload-server https://up-jp.tmp.link
+# 永久保存重要文件
+./tmplink-cli -file ~/backup.zip -model 99
 
-# 使用临时Token
-./tmplink-cli -file ./file.txt -token temporary_token
-
-# 设置默认配置
-./tmplink-cli -set-model 2              # 7天有效期
-./tmplink-cli -set-mr-id folder123      # 指定目录
-
-# 调试模式
-./tmplink-cli -file ./test.txt -debug
+# 临时使用其他 Token
+./tmplink-cli -file test.txt -token 临时TOKEN
 ```
 
-#### CLI进度显示
+## ⚙️ 参数说明
 
-CLI模式提供类似wget/curl的进度显示：
-
-```
-🚀 开始上传文件: document.pdf
-📊 文件大小: 2.5 MB
-
-📤 上传中 [████████████████████████████████████████] 100% | 2.5 MB/2.5 MB | 1.2 MB/s | ETA: 0s
-
-✅ 上传完成!
-📁 文件名: document.pdf
-📊 文件大小: 2.5 MB
-⚡ 平均速度: 1.15 MB/s
-⏱️ 总耗时: 2s
-🔗 下载链接: https://tmp.link/f/abc123
-```
-
-## 参数说明
-
-### 必需参数
-
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| `-file` | 要上传的文件路径 | `/home/user/document.pdf` |
-
-### 常用参数
-
-| 参数 | 说明 | 默认值 | 示例 |
-|------|------|--------|------|
-| `-chunk-size` | 分块大小(MB,1-99) | `3` | `5` |
-| `-model` | 文件有效期 | `0`(24小时) | `99`(无限期) |
-| `-token` | API Token | 已保存值 | `your_token` |
-| `-debug` | 调试模式 | `false` | - |
+### 基础参数
+- `-file` 文件路径（必需）
+- `-token` API Token（可保存到配置）
+- `-chunk-size` 分块大小，1-99MB（默认3MB）
+- `-model` 文件保存时长：0=24小时，1=3天，2=7天，99=永久
 
 ### 配置管理
+- `-set-token` 保存 Token 到配置文件
+- `-set-model` 设置默认保存时长  
+- `-set-mr-id` 设置默认上传目录
 
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| `-set-token` | 设置并保存API Token | `your_token_here` |
-| `-set-model` | 设置默认文件有效期 | `2` |
-| `-set-mr-id` | 设置默认目录ID | `xxxx` |
+## 🔧 常见问题
 
-**文件有效期选项：**
-- `0`: 24小时 (默认)
-- `1`: 3天  
-- `2`: 7天
-- `99`: 无限期
-
-## 故障排除
-
-### 常见问题
-
-**1. macOS安全提示**
+### macOS "无法验证开发者"
 ```bash
-# 解决"无法验证开发者"错误
 xattr -d com.apple.quarantine tmplink tmplink-cli
 ```
 
-**2. Linux权限问题**
+### Linux/macOS 权限问题
 ```bash
-# 设置执行权限
 chmod +x tmplink tmplink-cli
 ```
 
-**3. Windows Defender拦截**
-- 点击"更多信息" → "仍要运行"
-- 或添加到信任列表
+### Windows Defender 警告
+点击"更多信息" → "仍要运行"，或将程序添加到信任列表。
 
-**4. Token相关问题**
-- 确认从正确位置复制Token
-- 检查Token是否过期
-- 重新登录钛盘获取新Token
-
-**5. 上传失败**
-- 检查网络连接
-- 验证文件权限
-- 使用`-debug`参数获取详细错误信息
-
-### 获取帮助
+### 上传失败排查
+1. 检查网络连接
+2. 验证 Token 是否有效
+3. 使用 `-debug` 参数查看详细错误
 
 ```bash
-# 查看所有参数
-./tmplink-cli -h
-
-# 启用调试模式
 ./tmplink-cli -debug -file test.txt
-
-# 查看详细文档
-cat docs/usage.md
 ```
 
-## 相关文档
+## 📚 了解更多
 
-- 📚 [详细使用指南](docs/usage.md) - 完整的功能说明和使用示例
-- 🔧 [技术文档](docs/technical.md) - 架构设计和开发指南
-- 🔌 [API文档](docs/api.md) - 钛盘API集成规范
-- 🎨 [设计文档](docs/design.md) - 系统设计理念和架构
-- 📦 [预编译版本说明](build/README.md) - 跨平台版本使用指南
+- [详细使用指南](docs/usage.md) - 完整功能介绍和高级用法
+- [技术文档](docs/technical.md) - 开发者和技术爱好者参考
+- [API 文档](docs/api.md) - 钛盘 API 接口说明
 
-## 版本更新
+## 🆘 获取帮助
 
-### v1.0.1 (2025-05-25)
-- 🐛 修复GUI上传进程通信问题
-- ✅ 完善CLI参数文档和错误处理
-- 🎯 新增CLI模式实时进度条显示
+遇到问题？试试这些：
 
-### v1.0.0 (2025-05-24)
-- 🎉 首次发布，实现双进程架构
-- ✅ 支持GUI和CLI双模式
-- 📊 完成分块上传和权限分级系统
+```bash
+# 查看所有命令参数
+./tmplink-cli -h
 
-## 许可证
+# 启用详细日志
+./tmplink-cli -debug -file yourfile.txt
+```
 
-本项目基于 Apache 2.0 许可证开源。详见 [LICENSE](LICENSE) 文件。
+还有问题？[提交 Issue](https://github.com/tmplink/tmplink_uploader/issues) 或查看[详细文档](docs/)。
+
+## 📄 开源协议
+
+本项目基于 [Apache 2.0](LICENSE) 协议开源。
 
 ---
 
-💡 **提示**: 如有问题或建议，欢迎提交 [Issue](https://github.com/tmplink/tmplink_uploader/issues) 或 [Pull Request](https://github.com/tmplink/tmplink_uploader/pulls)。
+💡 **小贴士**: 图形界面适合日常使用，命令行适合批量处理和脚本自动化！
