@@ -461,6 +461,29 @@ func main() {
 	// 设置进度回调
 	progressCallback := createProgressCallback(cliMode, fileInfo.Size(), speedCalc, task, *statusFile)
 
+	// 验证Token有效性
+	debugPrint(config, "验证Token有效性...")
+	if _, err := validateTokenAndGetUID(finalToken, config.Server); err != nil {
+		task.Status = "failed"
+		task.ErrorMsg = fmt.Sprintf("Token验证失败: %v", err)
+		task.UpdatedAt = time.Now()
+
+		// CLI模式：显示失败信息
+		if cliMode {
+			fmt.Printf("❌ Token验证失败!\n")
+			fmt.Printf("❗ 错误信息: %v\n", err)
+			fmt.Println("💡 请使用 -set-token 命令重新设置有效的API Token")
+		} else {
+			// GUI模式：保存状态到文件
+			if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
+			}
+			fmt.Fprintf(os.Stderr, "Token验证失败: %v\n", err)
+		}
+		os.Exit(1)
+	}
+	debugPrint(config, "Token验证成功")
+
 	// 开始上传
 	task.Status = "uploading"
 	task.UpdatedAt = time.Now()
@@ -1309,37 +1332,49 @@ func validateTokenAndGetUID(token, server string) (string, error) {
 		return "", err
 	}
 
-	var userResp struct {
-		Status int `json:"status"`
-		Data   struct {
-			UID int64 `json:"uid"`
-		} `json:"data"`
+	// 使用两阶段解析处理不同的响应格式
+	var baseResp struct {
+		Status int         `json:"status"`
+		Data   interface{} `json:"data"`
 	}
 
-	if err := json.Unmarshal(body, &userResp); err != nil {
-		return "", fmt.Errorf("解析用户响应失败: %w", err)
+	if err := json.Unmarshal(body, &baseResp); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
 	}
 
-	if userResp.Status != 1 {
+	if baseResp.Status != 1 {
+		// Token无效时，data可能是字符串错误信息
 		var errorMsg string
-		switch userResp.Status {
+		switch baseResp.Status {
 		case 2:
-			errorMsg = "Token验证失败: Token无效或已过期，请重新获取API Token"
+			errorMsg = "Token无效或已过期，请重新获取API Token"
 		case 3:
-			errorMsg = "Token验证失败: 用户账号被禁用"
+			errorMsg = "用户账号被禁用"
 		case 0:
-			errorMsg = "Token验证失败: 请求参数错误"
+			errorMsg = "请求参数错误"
 		default:
-			errorMsg = fmt.Sprintf("Token验证失败，状态码: %d", userResp.Status)
+			errorMsg = fmt.Sprintf("验证失败，状态码: %d", baseResp.Status)
 		}
+		
+		// 如果data是字符串，追加详细错误信息
+		if dataStr, ok := baseResp.Data.(string); ok && dataStr != "" {
+			errorMsg += fmt.Sprintf(" (%s)", dataStr)
+		}
+		
 		return "", fmt.Errorf("%s", errorMsg)
 	}
 
-	if userResp.Data.UID == 0 {
-		return "", fmt.Errorf("无法获取用户UID")
+	// 状态为1时，data应该是包含用户信息的对象
+	if dataMap, ok := baseResp.Data.(map[string]interface{}); ok {
+		if uidFloat, exists := dataMap["uid"].(float64); exists && uidFloat > 0 {
+			return fmt.Sprintf("%.0f", uidFloat), nil
+		}
+		if uidInt, exists := dataMap["uid"].(int64); exists && uidInt > 0 {
+			return fmt.Sprintf("%d", uidInt), nil
+		}
 	}
 
-	return fmt.Sprintf("%d", userResp.Data.UID), nil
+	return "", fmt.Errorf("无法获取用户UID")
 }
 
 // UploadTokens 上传所需的tokens
