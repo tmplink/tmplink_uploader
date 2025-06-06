@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 	"tmplink_uploader/internal/updater"
 )
 
@@ -220,6 +221,30 @@ func isFlagSet(f *flag.Flag) bool {
 	return found
 }
 
+// getProgressBarWidth 根据终端宽度计算进度条宽度
+func getProgressBarWidth() int {
+	// 尝试获取终端宽度
+	if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+		// 计算进度条的宽度
+		// 预留空间给其他元素：百分比(4) + 空格(2) + 括号(2) + 文件大小显示(~25) + 速度显示(~15) + 描述(~8) = ~56字符
+		// 额外预留10字符空间以确保不会超出
+		reservedSpace := 66
+		barWidth := width - reservedSpace
+
+		// 最小宽度20，最大宽度80
+		if barWidth < 20 {
+			return 20
+		}
+		if barWidth > 80 {
+			return 80
+		}
+		return barWidth
+	}
+
+	// 无法获取终端宽度时使用默认值
+	return 40
+}
+
 func main() {
 	// 定义命令行参数
 	var (
@@ -257,9 +282,9 @@ func main() {
 			fmt.Printf("检查更新失败: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		if updateInfo.HasUpdate {
-			fmt.Printf("发现新版本: %s (当前版本: %s)\n", 
+			fmt.Printf("发现新版本: %s (当前版本: %s)\n",
 				updateInfo.LatestVersion, updateInfo.CurrentVersion)
 			fmt.Printf("下载地址: %s\n", updateInfo.DownloadURL)
 			fmt.Println("使用 --auto-update 参数自动下载更新")
@@ -461,6 +486,29 @@ func main() {
 	// 设置进度回调
 	progressCallback := createProgressCallback(cliMode, fileInfo.Size(), speedCalc, task, *statusFile)
 
+	// 验证Token有效性
+	debugPrint(config, "验证Token有效性...")
+	if _, err := validateTokenAndGetUID(finalToken, config.Server); err != nil {
+		task.Status = "failed"
+		task.ErrorMsg = fmt.Sprintf("Token验证失败: %v", err)
+		task.UpdatedAt = time.Now()
+
+		// CLI模式：显示失败信息
+		if cliMode {
+			fmt.Printf("❌ Token验证失败!\n")
+			fmt.Printf("❗ 错误信息: %v\n", err)
+			fmt.Println("💡 请使用 -set-token 命令重新设置有效的API Token")
+		} else {
+			// GUI模式：保存状态到文件
+			if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
+			}
+			fmt.Fprintf(os.Stderr, "Token验证失败: %v\n", err)
+		}
+		os.Exit(1)
+	}
+	debugPrint(config, "Token验证成功")
+
 	// 开始上传
 	task.Status = "uploading"
 	task.UpdatedAt = time.Now()
@@ -486,14 +534,13 @@ func main() {
 			fmt.Printf("❗ 错误信息: %v\n", err)
 		} else {
 			// GUI模式：保存状态到文件
-			if !cliMode {
-				if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
-				}
+			if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
 			}
+			// GUI模式下仍然输出到stderr，供调试使用
+			fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
 		}
 
-		fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -604,7 +651,7 @@ func uploadFile(ctx context.Context, config *Config, filePath string, progressCa
 	debugPrint(config, "步骤3: 开始分片上传...")
 	downloadURL, err = workerSlice(ctx, config, filePath, sha1Hash, fileName, fileInfo.Size(), uploadInfo.UToken, progressCallback)
 	if err != nil {
-		return nil, fmt.Errorf("分片上传失败: %w", err)
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	return &UploadResult{DownloadURL: downloadURL}, nil
@@ -828,7 +875,7 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 					// 上传分片
 					err := uploadSlice(ctx, client, config, filePath, fileName, upToken, nextSlice, resumeTracker, progressCallback)
 					if err != nil {
-						return "", fmt.Errorf("分片 %d 上传失败: %w", nextSlice, err)
+						return "", fmt.Errorf("分片 %d: %w", nextSlice, err)
 					}
 					debugPrint(config, "分片 #%d 上传完成", nextSlice)
 
@@ -883,7 +930,9 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 				}
 			}
 
-			return "", fmt.Errorf("服务器返回上传失败，错误码: %v", prepareResp.Data)
+			// 获取详细错误信息
+			errorMsg := getUploadErrorMessage(prepareResp.Data)
+			return "", fmt.Errorf("%s", errorMsg)
 
 		default:
 			debugPrint(config, "未知状态码: %d", prepareResp.Status)
@@ -991,7 +1040,19 @@ func uploadSlice(ctx context.Context, client *http.Client, config *Config, fileP
 	// 根据JavaScript代码，状态5表示分片上传完成
 	if uploadResult.Status != 1 && uploadResult.Status != 2 && uploadResult.Status != 3 && uploadResult.Status != 5 {
 		debugPrint(config, "分片上传失败，状态码: %d", uploadResult.Status)
-		return fmt.Errorf("分片上传失败，状态码: %d", uploadResult.Status)
+		// 为分片上传失败提供更详细的错误信息
+		var errorMsg string
+		switch uploadResult.Status {
+		case 7:
+			errorMsg = "认证错误或权限不足，请检查Token是否有效"
+		case 4:
+			errorMsg = "分片大小超出限制"
+		case 6:
+			errorMsg = "没有权限上传到指定位置"
+		default:
+			errorMsg = fmt.Sprintf("分片上传失败，状态码: %d", uploadResult.Status)
+		}
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	debugPrint(config, "分片 #%d 上传成功", sliceIndex)
@@ -1079,7 +1140,18 @@ func getUTokenOnly(ctx context.Context, config *Config, sha1Hash, fileName strin
 
 	if selectResp.Status != 1 {
 		debugPrint(config, "API返回错误状态: %d", selectResp.Status)
-		return nil, fmt.Errorf("获取UToken失败，状态码: %d", selectResp.Status)
+		var errorMsg string
+		switch selectResp.Status {
+		case 2:
+			errorMsg = "获取UToken失败: Token无效或已过期"
+		case 3:
+			errorMsg = "获取UToken失败: 用户权限不足"
+		case 0:
+			errorMsg = "获取UToken失败: 请求参数错误"
+		default:
+			errorMsg = fmt.Sprintf("获取UToken失败，状态码: %d", selectResp.Status)
+		}
+		return nil, fmt.Errorf("%s", errorMsg)
 	}
 
 	return &UploadInfo{
@@ -1142,7 +1214,18 @@ func getUploadServers(ctx context.Context, config *Config, sha1Hash, fileName st
 
 	if selectResp.Status != 1 {
 		debugPrint(config, "API返回错误状态: %d", selectResp.Status)
-		return nil, fmt.Errorf("获取上传服务器失败，状态码: %d", selectResp.Status)
+		var errorMsg string
+		switch selectResp.Status {
+		case 2:
+			errorMsg = "获取上传服务器失败: Token无效或已过期"
+		case 3:
+			errorMsg = "获取上传服务器失败: 用户权限不足"
+		case 0:
+			errorMsg = "获取上传服务器失败: 请求参数错误"
+		default:
+			errorMsg = fmt.Sprintf("获取上传服务器失败，状态码: %d", selectResp.Status)
+		}
+		return nil, fmt.Errorf("%s", errorMsg)
 	}
 
 	// 解析第一个可用的上传服务器
@@ -1274,26 +1357,49 @@ func validateTokenAndGetUID(token, server string) (string, error) {
 		return "", err
 	}
 
-	var userResp struct {
-		Status int `json:"status"`
-		Data   struct {
-			UID int64 `json:"uid"`
-		} `json:"data"`
+	// 使用两阶段解析处理不同的响应格式
+	var baseResp struct {
+		Status int         `json:"status"`
+		Data   interface{} `json:"data"`
 	}
 
-	if err := json.Unmarshal(body, &userResp); err != nil {
-		return "", fmt.Errorf("解析用户响应失败: %w", err)
+	if err := json.Unmarshal(body, &baseResp); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
 	}
 
-	if userResp.Status != 1 {
-		return "", fmt.Errorf("token验证失败，状态码: %d", userResp.Status)
+	if baseResp.Status != 1 {
+		// Token无效时，data可能是字符串错误信息
+		var errorMsg string
+		switch baseResp.Status {
+		case 2:
+			errorMsg = "Token无效或已过期，请重新获取API Token"
+		case 3:
+			errorMsg = "用户账号被禁用"
+		case 0:
+			errorMsg = "请求参数错误"
+		default:
+			errorMsg = fmt.Sprintf("验证失败，状态码: %d", baseResp.Status)
+		}
+
+		// 如果data是字符串，追加详细错误信息
+		if dataStr, ok := baseResp.Data.(string); ok && dataStr != "" {
+			errorMsg += fmt.Sprintf(" (%s)", dataStr)
+		}
+
+		return "", fmt.Errorf("%s", errorMsg)
 	}
 
-	if userResp.Data.UID == 0 {
-		return "", fmt.Errorf("无法获取用户UID")
+	// 状态为1时，data应该是包含用户信息的对象
+	if dataMap, ok := baseResp.Data.(map[string]interface{}); ok {
+		if uidFloat, exists := dataMap["uid"].(float64); exists && uidFloat > 0 {
+			return fmt.Sprintf("%.0f", uidFloat), nil
+		}
+		if uidInt, exists := dataMap["uid"].(int64); exists && uidInt > 0 {
+			return fmt.Sprintf("%d", uidInt), nil
+		}
 	}
 
-	return fmt.Sprintf("%d", userResp.Data.UID), nil
+	return "", fmt.Errorf("无法获取用户UID")
 }
 
 // UploadTokens 上传所需的tokens
@@ -1729,7 +1835,7 @@ func getDownloadURL(ctx context.Context, client *http.Client, config *Config, sh
 // clearProgressBar 清除进度条残留和开始信息
 func clearProgressBar() {
 	// 清除我们输出的内容：进度条 + 文件大小行 + 开始上传行（共3行）
-	fmt.Print("\r\033[K")     // 清除当前行（进度条）
+	fmt.Print("\r\033[K")      // 清除当前行（进度条）
 	fmt.Print("\033[1A\033[K") // 向上移动一行并清除（文件大小行）
 	fmt.Print("\033[1A\033[K") // 向上移动一行并清除（开始上传行）
 	// 现在光标在开始上传行的位置，准备输出完成信息
@@ -1764,7 +1870,7 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 				bar = progressbar.NewOptions64(
 					total,
 					progressbar.OptionSetDescription("📤 上传中"),
-					progressbar.OptionSetWidth(40),
+					progressbar.OptionSetWidth(getProgressBarWidth()),
 					progressbar.OptionShowBytes(true),
 					progressbar.OptionSetTheme(progressbar.Theme{
 						Saucer:        "█",
@@ -1773,7 +1879,6 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 						BarStart:      "[",
 						BarEnd:        "]",
 					}),
-					progressbar.OptionShowIts(),
 					progressbar.OptionShowCount(),
 					progressbar.OptionSetPredictTime(true),
 					progressbar.OptionShowDescriptionAtLineEnd(),
@@ -1883,7 +1988,7 @@ func showConfigStatus() {
 	fmt.Println("🔧 当前运行参数:")
 	fmt.Printf("   分块大小: %dMB\n", finalChunkSize)
 	fmt.Printf("   跳过上传: %d (%s)\n", finalSkipUpload, map[int]string{0: "禁用秒传检查", 1: "启用秒传检查"}[finalSkipUpload])
-	
+
 	debugStatus := "关闭"
 	if finalDebug {
 		debugStatus = "开启"
@@ -1924,4 +2029,42 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// getUploadErrorMessage 根据错误代码返回具体的错误信息
+func getUploadErrorMessage(data interface{}) string {
+	// 尝试将data转换为具体的错误代码
+	var errorCode int
+	switch v := data.(type) {
+	case float64:
+		errorCode = int(v)
+	case int:
+		errorCode = v
+	default:
+		return fmt.Sprintf("上传失败，未知错误: %v", data)
+	}
+
+	// 根据错误代码返回具体的错误信息
+	switch errorCode {
+	case 2:
+		return "认证失败: Token或UToken无效、过期或缺失，请检查API Token是否正确且有效"
+	case 3:
+		return "上传失败: 不能上传空文件"
+	case 4:
+		return "上传失败: 文件大小超出了系统允许的最大大小(50GB)"
+	case 5:
+		return "上传失败: 已超出单日允许的最大上传量"
+	case 6:
+		return "上传失败: 没有权限上传到指定的文件夹"
+	case 7:
+		return "上传失败: 文件超出了私有存储空间限制"
+	case 8:
+		return "上传失败: 指定的文件夹不存在，请检查mr_id参数是否正确"
+	case 9:
+		return "上传失败: 无法获取上传节点信息，请稍后重试"
+	case 10:
+		return "上传失败: 文件名包含不允许的字符，请重命名后重试"
+	default:
+		return fmt.Sprintf("上传失败，错误代码: %d", errorCode)
+	}
 }
