@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 	"tmplink_uploader/internal/updater"
 )
 
@@ -220,6 +221,30 @@ func isFlagSet(f *flag.Flag) bool {
 	return found
 }
 
+// getProgressBarWidth 根据终端宽度计算进度条宽度
+func getProgressBarWidth() int {
+	// 尝试获取终端宽度
+	if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+		// 计算进度条的宽度
+		// 预留空间给其他元素：百分比(4) + 空格(2) + 括号(2) + 文件大小显示(~25) + 速度显示(~15) + 描述(~8) = ~56字符
+		// 额外预留10字符空间以确保不会超出
+		reservedSpace := 66
+		barWidth := width - reservedSpace
+
+		// 最小宽度20，最大宽度80
+		if barWidth < 20 {
+			return 20
+		}
+		if barWidth > 80 {
+			return 80
+		}
+		return barWidth
+	}
+
+	// 无法获取终端宽度时使用默认值
+	return 40
+}
+
 func main() {
 	// 定义命令行参数
 	var (
@@ -257,9 +282,9 @@ func main() {
 			fmt.Printf("检查更新失败: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		if updateInfo.HasUpdate {
-			fmt.Printf("发现新版本: %s (当前版本: %s)\n", 
+			fmt.Printf("发现新版本: %s (当前版本: %s)\n",
 				updateInfo.LatestVersion, updateInfo.CurrentVersion)
 			fmt.Printf("下载地址: %s\n", updateInfo.DownloadURL)
 			fmt.Println("使用 --auto-update 参数自动下载更新")
@@ -1355,12 +1380,12 @@ func validateTokenAndGetUID(token, server string) (string, error) {
 		default:
 			errorMsg = fmt.Sprintf("验证失败，状态码: %d", baseResp.Status)
 		}
-		
+
 		// 如果data是字符串，追加详细错误信息
 		if dataStr, ok := baseResp.Data.(string); ok && dataStr != "" {
 			errorMsg += fmt.Sprintf(" (%s)", dataStr)
 		}
-		
+
 		return "", fmt.Errorf("%s", errorMsg)
 	}
 
@@ -1810,7 +1835,7 @@ func getDownloadURL(ctx context.Context, client *http.Client, config *Config, sh
 // clearProgressBar 清除进度条残留和开始信息
 func clearProgressBar() {
 	// 清除我们输出的内容：进度条 + 文件大小行 + 开始上传行（共3行）
-	fmt.Print("\r\033[K")     // 清除当前行（进度条）
+	fmt.Print("\r\033[K")      // 清除当前行（进度条）
 	fmt.Print("\033[1A\033[K") // 向上移动一行并清除（文件大小行）
 	fmt.Print("\033[1A\033[K") // 向上移动一行并清除（开始上传行）
 	// 现在光标在开始上传行的位置，准备输出完成信息
@@ -1845,7 +1870,7 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 				bar = progressbar.NewOptions64(
 					total,
 					progressbar.OptionSetDescription("📤 上传中"),
-					progressbar.OptionSetWidth(40),
+					progressbar.OptionSetWidth(getProgressBarWidth()),
 					progressbar.OptionShowBytes(true),
 					progressbar.OptionSetTheme(progressbar.Theme{
 						Saucer:        "█",
@@ -1854,7 +1879,6 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 						BarStart:      "[",
 						BarEnd:        "]",
 					}),
-					progressbar.OptionShowIts(),
 					progressbar.OptionShowCount(),
 					progressbar.OptionSetPredictTime(true),
 					progressbar.OptionShowDescriptionAtLineEnd(),
@@ -1964,7 +1988,7 @@ func showConfigStatus() {
 	fmt.Println("🔧 当前运行参数:")
 	fmt.Printf("   分块大小: %dMB\n", finalChunkSize)
 	fmt.Printf("   跳过上传: %d (%s)\n", finalSkipUpload, map[int]string{0: "禁用秒传检查", 1: "启用秒传检查"}[finalSkipUpload])
-	
+
 	debugStatus := "关闭"
 	if finalDebug {
 		debugStatus = "开启"
