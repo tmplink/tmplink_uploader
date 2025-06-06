@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -9,9 +10,51 @@ import (
 
 	"github.com/charmbracelet/bubbletea"
 	"tmplink_uploader/internal/gui/tui"
+	"tmplink_uploader/internal/updater"
 )
 
 func main() {
+	// 定义命令行参数
+	var (
+		checkUpdate  = flag.Bool("check-update", false, "检查是否有新版本可用")
+		autoUpdate   = flag.Bool("auto-update", false, "自动检查并下载更新")
+		showVersion  = flag.Bool("version", false, "显示当前版本号")
+	)
+
+	flag.Parse()
+
+	// 处理版本相关的情况
+	if *showVersion {
+		fmt.Printf("tmplink GUI 版本: %s\n", updater.CURRENT_VERSION)
+		return
+	}
+
+	if *checkUpdate {
+		updateInfo, err := updater.CheckForUpdate("gui")
+		if err != nil {
+			fmt.Printf("检查更新失败: %v\n", err)
+			os.Exit(1)
+		}
+		
+		if updateInfo.HasUpdate {
+			fmt.Printf("发现新版本: %s (当前版本: %s)\n", 
+				updateInfo.LatestVersion, updateInfo.CurrentVersion)
+			fmt.Printf("下载地址: %s\n", updateInfo.DownloadURL)
+			fmt.Println("使用 --auto-update 参数自动下载更新")
+		} else {
+			fmt.Printf("当前版本 %s 已是最新版本\n", updateInfo.CurrentVersion)
+		}
+		return
+	}
+
+	if *autoUpdate {
+		if err := updater.AutoUpdate("gui"); err != nil {
+			fmt.Printf("自动更新失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// 获取CLI程序路径
 	cliPath := getCLIPath()
 	
@@ -19,6 +62,9 @@ func main() {
 	if err := validateCLIPath(cliPath); err != nil {
 		log.Fatalf("CLI程序验证失败: %v\n请确保tmplink-cli程序位于: %s", err, cliPath)
 	}
+
+	// 启动时检查更新（后台进行，不阻塞用户操作）
+	updater.CheckUpdateOnStartup("gui")
 
 	// 创建TUI模型
 	model := tui.NewModel(cliPath)

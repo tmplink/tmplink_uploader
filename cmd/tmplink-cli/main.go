@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/schollz/progressbar/v3"
+	"tmplink_uploader/internal/updater"
 )
 
 // CLI配置文件
@@ -237,9 +238,44 @@ func main() {
 		skipUpload   = flag.Int("skip-upload", 1, "跳过上传标志 (1=检查秒传)")
 		debugMode    = flag.Bool("debug", false, "调试模式，输出详细运行信息")
 		showStatus   = flag.Bool("status", false, "显示当前配置状态和token有效性")
+		checkUpdate  = flag.Bool("check-update", false, "检查是否有新版本可用")
+		autoUpdate   = flag.Bool("auto-update", false, "自动检查并下载更新")
+		showVersion  = flag.Bool("version", false, "显示当前版本号")
 	)
 
 	flag.Parse()
+
+	// 处理版本相关的情况
+	if *showVersion {
+		fmt.Printf("tmplink-cli 版本: %s\n", updater.CURRENT_VERSION)
+		return
+	}
+
+	if *checkUpdate {
+		updateInfo, err := updater.CheckForUpdate("cli")
+		if err != nil {
+			fmt.Printf("检查更新失败: %v\n", err)
+			os.Exit(1)
+		}
+		
+		if updateInfo.HasUpdate {
+			fmt.Printf("发现新版本: %s (当前版本: %s)\n", 
+				updateInfo.LatestVersion, updateInfo.CurrentVersion)
+			fmt.Printf("下载地址: %s\n", updateInfo.DownloadURL)
+			fmt.Println("使用 --auto-update 参数自动下载更新")
+		} else {
+			fmt.Printf("当前版本 %s 已是最新版本\n", updateInfo.CurrentVersion)
+		}
+		return
+	}
+
+	if *autoUpdate {
+		if err := updater.AutoUpdate("cli"); err != nil {
+			fmt.Printf("自动更新失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// 处理设置参数的情况
 	if *setToken != "" || *setModel >= 0 || *setMrID != "" {
@@ -358,6 +394,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "错误: 文件不存在: %s\n", *filePath)
 		os.Exit(1)
 	}
+
+	// 启动时检查更新（后台进行，不阻塞用户操作）
+	updater.CheckUpdateOnStartup("cli")
 
 	// 获取文件信息
 	fileInfo, err := os.Stat(*filePath)

@@ -387,6 +387,16 @@ The Go client handles dynamic API responses:
 ### Recent Bug Fixes and Improvements
 - **Retry mechanism removal**: Removed all retry logic for faster error feedback and simplified code
 - **Token validation enhancement**: Two-phase JSON parsing for better error messages when tokens expire
+- **Auto-update functionality (2025-06-06)**: Implemented version checking and automatic update system
+  - Added `version.json` with CLI and GUI version tracking
+  - Created `internal/updater` package for version management
+  - CLI supports `--version`, `--check-update`, `--auto-update` parameters
+  - GUI supports `--version`, `--check-update`, `--auto-update` parameters
+  - **Automatic startup check**: Programs automatically check for updates when starting normal operations
+  - Background update checking with non-blocking goroutines
+  - Silent failure handling to avoid interrupting user experience
+  - Downloads from GitHub releases based on detected platform
+  - Supports all platforms: Linux (32/64/ARM64), Windows (32/64), macOS (Intel/ARM64)
 - **Upload speed implementation**: Added SpeedCalculator with weighted averaging for accurate speed monitoring
 - **Server address handling**: Fixed GUI server selection to properly pass upload server addresses to CLI
 - **Dynamic server lists**: Replaced hardcoded server lists with real-time API retrieval

@@ -19,6 +19,7 @@ coverage.html
 .idea/
 *.swp
 *.swo
+.claude
 
 # Go模块缓存
 go.sum.backup
