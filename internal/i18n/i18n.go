@@ -30,7 +30,7 @@ var SupportedLanguages = []Language{
 }
 
 // DefaultLanguage is the fallback language
-const DefaultLanguage = LanguageCN
+const DefaultLanguage = LanguageEN
 
 var (
 	currentLanguage Language = DefaultLanguage

@@ -2043,6 +2043,22 @@ func (m Model) fetchUserInfo() tea.Cmd {
 	}
 }
 
+// mapAPILangToCode 将API返回的语言标识映射到我们的语言代码
+func mapAPILangToCode(apiLang string) string {
+	switch strings.ToLower(apiLang) {
+	case "zh", "zh-cn", "cn":
+		return "cn"
+	case "en", "en-us":
+		return "en"
+	case "zh-tw", "zh-hk", "tw", "hk":
+		return "hk"
+	case "ja", "jp":
+		return "jp"
+	default:
+		return "" // 未知语言
+	}
+}
+
 // callUserAPI 调用用户信息API
 func callUserAPI(token string) (UserInfo, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -2075,10 +2091,11 @@ func callUserAPI(token string) (UserInfo, error) {
 	var detailApiResp struct {
 		Status int `json:"status"`
 		Data   struct {
-			UID          int64 `json:"uid"`
-			Storage      int64 `json:"storage"`
-			StorageUsed  int64 `json:"storage_used"`
-			Sponsor      bool  `json:"sponsor"`
+			UID          int64  `json:"uid"`
+			Storage      int64  `json:"storage"`
+			StorageUsed  int64  `json:"storage_used"`
+			Sponsor      bool   `json:"sponsor"`
+			Lang         string `json:"lang,omitempty"` // API返回的用户语言设置
 		} `json:"data"`
 		Msg string `json:"msg"`
 	}
@@ -2089,6 +2106,27 @@ func callUserAPI(token string) (UserInfo, error) {
 	
 	if detailApiResp.Status != 1 {
 		return UserInfo{}, fmt.Errorf("获取详细信息失败: %s", detailApiResp.Msg)
+	}
+	
+	// 如果API返回了语言设置，则尝试应用它
+	if detailApiResp.Data.Lang != "" {
+		// 尝试将API返回的lang映射到我们的语言代码
+		langCode := mapAPILangToCode(detailApiResp.Data.Lang)
+		
+		// 只有在有效时才更新
+		if langCode != "" {
+			config := LoadConfig()
+			
+			// 只在用户未明确设置语言时使用API返回的语言
+			if config.Language == "" {
+				config.Language = string(langCode)
+				// 静默保存，不报错以免影响主流程
+				_ = saveConfig(config)
+				
+				// 应用新的语言设置
+				i18n.InitLanguage(i18n.Language(langCode))
+			}
+		}
 	}
 	
 	// 第二步：获取用户名信息

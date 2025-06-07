@@ -70,6 +70,10 @@ func main() {
 	langSetting := *language
 	if langSetting == "" {
 		langSetting = config.Language
+		// 如果没有配置语言，则默认使用英语
+		if langSetting == "" {
+			langSetting = "en"
+		}
 	}
 	i18n.InitLanguage(i18n.Language(langSetting))
 
