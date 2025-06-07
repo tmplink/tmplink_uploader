@@ -23,6 +23,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	
+	"tmplink_uploader/internal/i18n"
 )
 
 // 应用状态
@@ -62,6 +64,7 @@ type Config struct {
 	MaxConcurrent    int    `json:"max_concurrent"`
 	QuickUpload      bool   `json:"quick_upload"`
 	SkipUpload       bool   `json:"skip_upload"`
+	Language         string `json:"language"` // 界面语言设置，如"zh-CN"或"en-US"
 }
 
 // getAvailableServers 从API获取可用的上传服务器列表
@@ -157,6 +160,7 @@ func defaultConfig() Config {
 		MaxConcurrent:      5,
 		QuickUpload:        true,
 		SkipUpload:         false,
+		Language:           "", // 空字符串表示自动检测系统语言
 	}
 }
 
@@ -238,11 +242,11 @@ func (i menuItem) Description() string { return i.desc }
 // NewModel 创建新的TUI模型
 func NewModel(cliPath string) Model {
 	// 加载配置
-	config := loadConfig()
+	config := LoadConfig()
 	
 	// 初始化token输入框
 	tokenInput := textinput.New()
-	tokenInput.Placeholder = "请输入TmpLink API Token"
+	tokenInput.Placeholder = i18n.T("enter_api_token")
 	tokenInput.Width = 50
 	
 	// 初始化状态
@@ -274,25 +278,25 @@ func NewModel(cliPath string) Model {
 	
 	// 初始化导航菜单
 	items := []list.Item{
-		menuItem{title: "文件浏览器", desc: "选择要上传的文件"},
-		menuItem{title: "上传设置", desc: "配置上传参数"},
-		menuItem{title: "上传管理器", desc: "查看和管理上传任务"},
+		menuItem{title: i18n.T("menu_file_browser"), desc: "选择要上传的文件"},
+		menuItem{title: i18n.T("menu_upload_settings"), desc: "配置上传参数"},
+		menuItem{title: i18n.T("menu_upload_manager"), desc: "查看和管理上传任务"},
 	}
 	
 	nav := list.New(items, list.NewDefaultDelegate(), 0, 0)
-	nav.Title = "功能菜单"
+	nav.Title = i18n.T("menu_title")
 	nav.SetShowStatusBar(false)
 	nav.SetFilteringEnabled(false)
 	nav.SetShowHelp(false)
 	
 	// 初始化上传任务表格
 	columns := []table.Column{
-		{Title: "文件名", Width: 25},
-		{Title: "大小", Width: 10},
-		{Title: "进度", Width: 10},
-		{Title: "速度", Width: 10},
-		{Title: "服务器", Width: 12},
-		{Title: "状态", Width: 10},
+		{Title: i18n.T("column_filename"), Width: 25},
+		{Title: i18n.T("column_size"), Width: 10},
+		{Title: i18n.T("column_progress"), Width: 10},
+		{Title: i18n.T("column_speed"), Width: 10},
+		{Title: i18n.T("column_server"), Width: 12},
+		{Title: i18n.T("column_status"), Width: 10},
 	}
 	
 	uploadTable := table.New(
@@ -333,13 +337,13 @@ func NewModel(cliPath string) Model {
 	settingsInputs := make(map[string]textinput.Model)
 	
 	chunkSizeInput := textinput.New()
-	chunkSizeInput.Placeholder = "分块大小(MB)"
+	chunkSizeInput.Placeholder = i18n.T("chunk_size_mb")
 	chunkSizeInput.Width = 20
 	chunkSizeInput.SetValue(fmt.Sprintf("%d", config.ChunkSize))
 	settingsInputs["chunk_size"] = chunkSizeInput
 	
 	concurrencyInput := textinput.New()
-	concurrencyInput.Placeholder = "并发数"
+	concurrencyInput.Placeholder = i18n.T("concurrency")
 	concurrencyInput.Width = 20
 	concurrencyInput.SetValue(fmt.Sprintf("%d", config.MaxConcurrent))
 	settingsInputs["concurrency"] = concurrencyInput
@@ -1251,9 +1255,9 @@ func (m Model) View() string {
 func (m Model) renderTokenInput() string {
 	var s strings.Builder
 	
-	s.WriteString(titleStyle.Render("TmpLink 文件上传工具"))
+	s.WriteString(titleStyle.Render(i18n.T("app_name")))
 	s.WriteString("\n\n")
-	s.WriteString("请输入您的TmpLink API Token:\n\n")
+	s.WriteString(i18n.T("enter_api_token") + ":\n\n")
 	s.WriteString(m.tokenInput.View())
 	s.WriteString("\n\n")
 	s.WriteString(helpStyle.Render("• Enter: 继续 • Ctrl+C: 退出"))
@@ -1264,7 +1268,7 @@ func (m Model) renderTokenInput() string {
 // renderStatusBar 渲染顶部状态栏（三行布局）
 func (m Model) renderStatusBar() string {
 	if m.isLoading {
-		return statusBarStyle.Render(fmt.Sprintf("%s 正在加载用户信息...", m.spinner.View()))
+		return statusBarStyle.Render(fmt.Sprintf("%s %s", m.spinner.View(), i18n.T("loading_user_info")))
 	}
 	
 	// 计算可用宽度
@@ -1278,15 +1282,15 @@ func (m Model) renderStatusBar() string {
 	// 第一行：用户信息和认证状态
 	var line1 string
 	if m.userInfo.Username != "" {
-		userText := fmt.Sprintf("用户: %s", m.userInfo.Username)
+		userText := i18n.T("user_info", m.userInfo.Username)
 		if m.userInfo.IsSponsored {
-			userText += " ✨ (赞助者)"
+			userText += i18n.T("user_sponsored")
 		} else {
-			userText += " (普通用户)"
+			userText += i18n.T("user_regular")
 		}
 		line1 = userText
 	} else {
-		line1 = "用户: 未登录"
+		line1 = i18n.T("user_not_logged_in")
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line1))
 	
@@ -1300,11 +1304,11 @@ func (m Model) renderStatusBar() string {
 		usagePercent := float64(m.userInfo.UsedSpace) / float64(m.userInfo.TotalSpace) * 100
 		
 		// 构建存储信息行
-		storageText := fmt.Sprintf("存储: %.1fGB/%.1fGB (%.1f%%)", usedGB, totalGB, usagePercent)
+		storageText := i18n.T("storage_info", usedGB, totalGB, usagePercent)
 		
 		// 添加上传状态（如果有）
 		if m.activeUploads > 0 {
-			uploadText := fmt.Sprintf(" | 上传中: %d个文件", m.activeUploads)
+			uploadText := fmt.Sprintf(" | %s", i18n.T("files_uploading", m.activeUploads))
 			// 计算总体上传速度
 			totalSpeed := 0.0
 			for _, task := range m.uploadTasks {
@@ -1325,7 +1329,7 @@ func (m Model) renderStatusBar() string {
 		line2 = storageText
 	} else {
 		if m.activeUploads > 0 {
-			line2 = fmt.Sprintf("上传中: %d个文件", m.activeUploads)
+			line2 = i18n.T("files_uploading", m.activeUploads)
 			// 计算总体上传速度
 			totalSpeed := 0.0
 			for _, task := range m.uploadTasks {
@@ -1341,7 +1345,7 @@ func (m Model) renderStatusBar() string {
 				}
 			}
 		} else {
-			line2 = "存储信息: 加载中..."
+			line2 = i18n.T("storage_loading")
 		}
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line2))
@@ -1350,15 +1354,15 @@ func (m Model) renderStatusBar() string {
 	var line3 string
 	switch m.state {
 	case StateMain:
-		line3 = "↑↓:选择 ←:上级 →:进入 t:隐藏文件 Tab:设置 Q:退出"
+		line3 = i18n.T("nav_file_browser")
 	case StateSettings:
-		line3 = "↑↓:选择 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
+		line3 = i18n.T("nav_settings")
 	case StateUploadList:
-		line3 = "↑↓:选择 d:删除 t:清除完成 y:清除全部 Tab:文件浏览 Esc:返回 Q:退出"
+		line3 = i18n.T("nav_upload_manager")
 	case StateError:
-		line3 = "操作: Enter:重试 Esc:返回 Q:退出"
+		line3 = i18n.T("nav_error")
 	default:
-		line3 = "操作: Q:退出"
+		line3 = i18n.T("nav_quit")
 	}
 	
 	// 确保操作提示不超过宽度，优先保留Q:退出
@@ -1492,7 +1496,7 @@ func (m Model) renderContent() string {
 
 // renderLoading 渲染加载界面
 func (m Model) renderLoading() string {
-	return fmt.Sprintf("\n%s 正在初始化...", m.spinner.View())
+	return fmt.Sprintf("\n%s %s", m.spinner.View(), i18n.T("initializing"))
 }
 
 // renderMainView 渲染主界面（文件浏览器）
@@ -1500,18 +1504,18 @@ func (m Model) renderMainView() string {
 	var s strings.Builder
 	
 	// 标题和当前路径
-	title := "文件浏览器"
+	title := i18n.T("file_browser_title")
 	if m.showHidden {
-		title += " (显示隐藏文件)"
+		title += i18n.T("show_hidden_files")
 	}
 	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n")
 	s.WriteString(fmt.Sprintf("当前目录: %s\n", m.currentDir))
-	s.WriteString(helpStyle.Render("📁目录 📄文件 🟡等待 🔵上传中 🟢已完成 🔴失败\n\n"))
+	s.WriteString(helpStyle.Render(i18n.T("file_browser_legend") + "\n\n"))
 	
 	// 文件列表
 	if len(m.files) == 0 {
-		s.WriteString("目录为空或正在加载...")
+		s.WriteString(i18n.T("directory_empty_loading"))
 	} else {
 		// 显示文件列表
 		maxHeight := m.height - 10 // 为三行状态栏和标题留空间
@@ -1615,14 +1619,14 @@ func (m Model) renderMainView() string {
 func (m Model) renderSettings() string {
 	var s strings.Builder
 	
-	s.WriteString(titleStyle.Render("上传设置"))
+	s.WriteString(titleStyle.Render(i18n.T("settings_title")))
 	s.WriteString("\n\n")
 	
 	// 赞助者状态提示
 	if m.userInfo.IsSponsored {
-		s.WriteString("✨ 赞助者专享设置\n\n")
+		s.WriteString(i18n.T("settings_sponsored_only") + "\n\n")
 	} else {
-		s.WriteString("⚠️  部分设置需要赞助者权限\n\n")
+		s.WriteString(i18n.T("settings_some_sponsored") + "\n\n")
 	}
 	
 	// 只有赞助者可以访问设置
@@ -1632,7 +1636,12 @@ func (m Model) renderSettings() string {
 	
 	if m.userInfo.IsSponsored {
 		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload"}
-		settingsLabels = []string{"分块大小 (MB):", "并发数:", "上传服务器:", "快速上传:"}
+		settingsLabels = []string{
+			i18n.T("chunk_size_mb"),
+			i18n.T("concurrency"),
+			i18n.T("upload_server"),
+			i18n.T("quick_upload"),
+		}
 		settingsSponsored = []bool{true, true, true, true}
 	}
 	
@@ -1969,8 +1978,8 @@ func getConfigPath() string {
 	return filepath.Join(homeDir, ".tmplink_config.json")
 }
 
-// loadConfig 加载配置
-func loadConfig() Config {
+// LoadConfig 加载配置 - 导出函数便于其他包使用
+func LoadConfig() Config {
 	configPath := getConfigPath()
 	
 	// 如果配置文件不存在，返回默认配置

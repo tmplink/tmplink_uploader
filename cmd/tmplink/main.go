@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbletea"
 	"tmplink_uploader/internal/gui/tui"
+	"tmplink_uploader/internal/i18n"
 	"tmplink_uploader/internal/updater"
 )
 
@@ -19,6 +20,7 @@ func main() {
 		checkUpdate  = flag.Bool("check-update", false, "检查是否有新版本可用")
 		autoUpdate   = flag.Bool("auto-update", false, "自动检查并下载更新")
 		showVersion  = flag.Bool("version", false, "显示当前版本号")
+		language     = flag.String("language", "", "界面语言 (cn/en/tw/jp)")
 	)
 
 	flag.Parse()
@@ -62,6 +64,14 @@ func main() {
 	if err := validateCLIPath(cliPath); err != nil {
 		log.Fatalf("CLI程序验证失败: %v\n请确保tmplink-cli程序位于: %s", err, cliPath)
 	}
+
+	// 初始化语言设置
+	config := tui.LoadConfig()
+	langSetting := *language
+	if langSetting == "" {
+		langSetting = config.Language
+	}
+	i18n.InitLanguage(i18n.Language(langSetting))
 
 	// 启动时检查更新（后台进行，不阻塞用户操作）
 	updater.CheckUpdateOnStartup("gui")
