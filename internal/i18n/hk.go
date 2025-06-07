@@ -1,8 +1,8 @@
 package i18n
 
-// initTW initializes the Traditional Chinese translations
-func initTW() {
-	messages[LanguageTW] = map[string]string{
+// initHK initializes the Traditional Chinese (Hong Kong) translations
+func initHK() {
+	messages[LanguageHK] = map[string]string{
 		// Common
 		"app_name":                 "TmpLink 檔案上傳工具",
 		"loading":                  "正在載入中...",

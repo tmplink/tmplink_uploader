@@ -20,7 +20,7 @@ func main() {
 		checkUpdate  = flag.Bool("check-update", false, "检查是否有新版本可用")
 		autoUpdate   = flag.Bool("auto-update", false, "自动检查并下载更新")
 		showVersion  = flag.Bool("version", false, "显示当前版本号")
-		language     = flag.String("language", "", "界面语言 (cn/en/tw/jp)")
+		language     = flag.String("language", "", "界面语言 (cn/en/hk/jp)")
 	)
 
 	flag.Parse()

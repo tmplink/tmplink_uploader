@@ -15,8 +15,8 @@ const (
 	LanguageCN Language = "cn"
 	// LanguageEN represents English
 	LanguageEN Language = "en"
-	// LanguageTW represents Traditional Chinese
-	LanguageTW Language = "tw"
+	// LanguageHK represents Traditional Chinese (Hong Kong)
+	LanguageHK Language = "hk"
 	// LanguageJP represents Japanese
 	LanguageJP Language = "jp"
 )
@@ -25,7 +25,7 @@ const (
 var SupportedLanguages = []Language{
 	LanguageCN,
 	LanguageEN,
-	LanguageTW,
+	LanguageHK,
 	LanguageJP,
 }
 
@@ -82,7 +82,7 @@ func DetectSystemLanguage() Language {
 	   strings.HasPrefix(langEnv, "zh_hk") || 
 	   strings.HasPrefix(langEnv, "zh-hk") || 
 	   strings.HasPrefix(langEnv, "zh_hant") {
-		return LanguageTW
+		return LanguageHK
 	}
 	
 	// Check for English
@@ -108,7 +108,7 @@ func InitLanguage(lang Language) {
 	// Initialize message maps
 	initCN() // Simplified Chinese
 	initEN() // English
-	initTW() // Traditional Chinese
+	initHK() // Traditional Chinese (Hong Kong)
 	initJP() // Japanese
 	
 	// Set language (falls back to default if not supported)

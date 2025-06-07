@@ -256,7 +256,7 @@ func main() {
 		setToken     = flag.String("set-token", "", "设置并保存API token")
 		setModel     = flag.Int("set-model", -1, "设置并保存默认文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)")
 		setMrID      = flag.String("set-mr-id", "", "设置并保存默认目录ID")
-		setLanguage  = flag.String("set-language", "", "设置并保存界面语言 (cn/en/tw/jp)")
+		setLanguage  = flag.String("set-language", "", "设置并保存界面语言 (cn/en/hk/jp)")
 		uploadServer = flag.String("upload-server", "", "强制指定上传服务器地址 (可选，留空自动选择)")
 		serverName   = flag.String("server-name", "", "上传服务器名称 (用于显示)")
 		chunkSizeMB  = flag.Int("chunk-size", 3, "分块大小(MB, 1-99)")
@@ -265,7 +265,7 @@ func main() {
 		model        = flag.Int("model", 0, "文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)")
 		mrID         = flag.String("mr-id", "0", "目录ID (默认0=根目录)")
 		skipUpload   = flag.Int("skip-upload", 1, "跳过上传标志 (1=检查秒传)")
-		language     = flag.String("language", "", "界面语言 (cn/en/tw/jp)")
+		language     = flag.String("language", "", "界面语言 (cn/en/hk/jp)")
 		debugMode    = flag.Bool("debug", false, "调试模式，输出详细运行信息")
 		showStatus   = flag.Bool("status", false, "显示当前配置状态和token有效性")
 		checkUpdate  = flag.Bool("check-update", false, "检查是否有新版本可用")
@@ -349,7 +349,7 @@ func main() {
 		if *setLanguage != "" {
 			// 验证语言参数
 			isValid := false
-			for _, lang := range []string{"cn", "en", "tw", "jp", ""} {
+			for _, lang := range []string{"cn", "en", "hk", "jp", ""} {
 				if *setLanguage == lang {
 					isValid = true
 					break
@@ -357,7 +357,7 @@ func main() {
 			}
 			
 			if !isValid {
-				fmt.Printf("错误: 无效的语言参数，支持的值: cn, en, tw, jp\n")
+				fmt.Printf("错误: 无效的语言参数，支持的值: cn, en, hk, jp\n")
 				os.Exit(1)
 			}
 			
@@ -370,7 +370,7 @@ func main() {
 				langDisplay = "中文"
 			case "en":
 				langDisplay = "English"
-			case "tw":
+			case "hk":
 				langDisplay = "繁體中文"
 			case "jp":
 				langDisplay = "日本語"
