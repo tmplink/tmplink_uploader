@@ -291,12 +291,14 @@ func getUserDetails(token, serverURL string) (UserInfo, error) {
 		userInfo.Username = "User" + userInfo.UID
 	}
 	
-	// 同时更新语言设置
+	// 同时更新语言设置并立即应用
 	if userInfo.Language != "" {
 		config := loadCLIConfig()
 		config.Language = userInfo.Language
 		// 静默保存
 		_ = saveCLIConfig(config)
+		// 立即应用新的语言设置
+		i18n.InitLanguage(i18n.Language(userInfo.Language))
 	}
 	
 	return userInfo, nil
@@ -568,7 +570,7 @@ func main() {
 	// 加载配置文件获取默认语言设置
 	savedConfig := loadCLIConfig()
 	
-	// 优先使用命令行参数中的语言设置
+	// 语言设置逻辑：优先从API获取，其次是命令行参数，再其次是保存的配置
 	langSetting := *language
 	if langSetting == "" {
 		langSetting = savedConfig.Language
@@ -586,7 +588,7 @@ func main() {
 
 	// 处理版本相关的情况
 	if *showVersion {
-		fmt.Printf("tmplink-cli 版本: %s\n", updater.CURRENT_VERSION)
+		fmt.Printf(i18n.T("version_cli"), updater.CURRENT_VERSION)
 		return
 	}
 
@@ -623,7 +625,7 @@ func main() {
 
 		if *setToken != "" {
 			// 验证Token有效性
-			fmt.Print("正在验证Token有效性...")
+			fmt.Print(i18n.T("validating_token"))
 			server := "https://tmplink-sec.vxtrans.com/api_v2"
 			if uid, err := validateTokenAndGetUID(*setToken, server); err != nil {
 				fmt.Printf("\n错误: Token验证失败: %v\n", err)
@@ -742,14 +744,17 @@ func main() {
 			fmt.Print("\033[2K\r") // \033[2K清除整行, \r将光标返回行首
 		}
 		
-		// 如果令牌有效且用户未通过命令行参数指定语言
-		if err == nil && *language == "" {
+		// 如果令牌有效，总是使用网站返回的语言设置（除非用户显式指定了语言）
+		if err == nil {
 			// 获取更新后的配置
 			// 在validateTokenAndGetUID中，如果API返回用户语言设置，则会自动更新savedConfig.Language
 			updatedConfig := loadCLIConfig()
-			if updatedConfig.Language != "" {
-				// 使用最新的语言设置
+			// 如果API返回了语言设置且用户没有通过命令行显式指定语言
+			if updatedConfig.Language != "" && *language == "" {
+				// 使用网站返回的语言设置
 				langSetting = updatedConfig.Language
+				// 确保立即应用新的语言设置
+				i18n.InitLanguage(i18n.Language(langSetting))
 			}
 		} else if err != nil {
 			// 如果令牌无效，且用户没有明确指定语言，则切换到英文
@@ -1080,46 +1085,32 @@ func showConfigStatus() {
 	// 显示默认目录ID
 	fmt.Printf("   %s: %s\n", i18n.T("config_dir_id_default"), config.MrID)
 	
-	// 语言设置 - 创建单独的区域
-	fmt.Println("\n" + i18n.T("account_language") + ":")
-	
-	// 配置的语言设置，使用一致的语言代码映射
-	var langDisplay string
-	switch config.Language {
-	case "cn":
-		langDisplay = "中文"
-	case "en":
-		langDisplay = "English"
-	case "hk":
-		langDisplay = "繁體中文"
-	case "jp":
-		langDisplay = "日本語"
-	case "":
-		langDisplay = i18n.T("config_language_auto")
-	default:
-		langDisplay = config.Language
-	}
-	
-	// 显示配置的语言设置
-	fmt.Printf("   %s: %s\n", i18n.T("config_language_setting"), langDisplay)
+	// 界面语言设置 - 创建单独的区域
+	fmt.Println("\n" + i18n.T("config_language_setting") + ":")
 	
 	// 显示当前实际使用的语言
 	currentLang := i18n.GetCurrentLanguage()
-	var actualLang string
-	
-	switch currentLang {
-	case i18n.LanguageCN:
-		actualLang = "中文"
-	case i18n.LanguageEN:
-		actualLang = "English"
-	case i18n.LanguageHK:
-		actualLang = "繁體中文"
-	case i18n.LanguageJP:
-		actualLang = "日本語"
+	fmt.Printf("   %s: %s\n", i18n.T("config_language_current"), getLangDisplayName(string(currentLang)))
+}
+
+// getLangDisplayName 根据当前界面语言返回适当的语言显示名称
+func getLangDisplayName(langCode string) string {
+	// 这里我们返回的是英语版本的语言名称，无论界面设置如何
+	// 这样可以保证在英语界面下显示英语名称
+	switch langCode {
+	case "cn":
+		return "Chinese"
+	case "en":
+		return "English"
+	case "hk":
+		return "Traditional Chinese"
+	case "jp":
+		return "Japanese"
+	case "":
+		return "Auto-detect"
 	default:
-		actualLang = string(currentLang)
+		return langCode
 	}
-	fmt.Printf("   %s: %s\n", i18n.T("config_language_current"), actualLang)
 }
 
 // saveTaskStatus 保存任务状态到文件
