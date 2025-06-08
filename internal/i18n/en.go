@@ -255,7 +255,7 @@ func initEN() {
 		"config_token_not_set":     "Token: ❓ Not set",
 		"config_model":             "Default expiration period",
 		"config_dir_id_default":            "Default directory ID",
-		"config_language_setting":  "Language setting",
+		"config_language_setting":  "Interface language",
 		"config_language_current":  "Current language",
 		"config_language_auto":     "Auto-detect",
 	}

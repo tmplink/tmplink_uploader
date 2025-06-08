@@ -4,7 +4,7 @@ package i18n
 func initJP() {
 	messages[LanguageJP] = map[string]string{
 		// Common
-		"app_name":                 "TmpLink ファイルアップローダー",
+		"app_name":                 "TMPLINK ファイルアップローダー",
 		"loading":                  "読み込み中...",
 		"error":                    "エラー",
 		"warning":                  "警告",
@@ -19,7 +19,7 @@ func initJP() {
 		"readonly":                 "読み取り専用",
 		
 		// Auth & User
-		"enter_api_token":          "TmpLink APIトークンを入力してください",
+		"enter_api_token":          "TMPLINK API トークンを入力してください",
 		"user_info_section":        "ユーザー情報",
 		"user_email":               "メール",
 		"content_count":            "コンテンツ",
@@ -113,8 +113,8 @@ func initJP() {
 		
 		// CLI Flags & Arguments
 		"cli_file_path":            "アップロードするファイルパス (必須)",
-		"cli_api_token":            "TmpLink APIトークン (省略可、保存済みのトークンを優先使用)",
-		"cli_set_token":            "APIトークンを設定して保存",
+		"cli_api_token":            "TMPLINK API トークン (省略可、保存済みのトークンを優先使用)",
+		"cli_set_token":            "API トークンを設定して保存",
 		"cli_set_model":            "デフォルトの有効期限を設定 (0=24時間, 1=3日, 2=7日, 99=無期限)",
 		"cli_set_dir_id":           "デフォルトのフォルダIDを設定",
 		"cli_upload_server":        "アップロードサーバーを指定 (省略可、空白で自動選択)",
@@ -134,10 +134,10 @@ func initJP() {
 		// Error Messages
 		"sync_user_settings":       "ユーザー設定を同期中...",
 		"language_set_to":          "言語設定が保存されました",
-		"cli_usage":                "TmpLink CLI - TmpLink用ファイルアップロードツール",
+		"cli_usage":                "TMPLINK CLI - TMPLINK 用ファイルアップロードツール",
 		"cli_language":             "インターフェース言語 (cn/en/hk/jp)",
 		"cli_set_language":         "インターフェース言語を設定して保存 (cn/en/hk/jp)",
-		"api_validation_failed":     "API検証失敗: %s",
+		"api_validation_failed":     "API 検証失敗: %s",
 		"create_request_failed":    "リクエストの作成に失敗: %v",
 		"send_request_failed":     "リクエストの送信に失敗: %v",
 		"server_error_status":     "サーバーがエラーステータスコードを返しました: %d",
@@ -171,7 +171,7 @@ func initJP() {
 		"config_debug_off":         "オフ",
 		
 		// Config status
-		"config_status_title":      "--- TmpLink CLI 設定状態 ---",
+		"config_status_title":      "--- TMPLINK CLI 設定状態 ---",
 		"config_token":             "Token",
 		"config_token_valid_short":       "✅ 有効 (UID: %s)",
 		"config_token_invalid_short":     "❌ 無効",

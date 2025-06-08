@@ -4,7 +4,7 @@ package i18n
 func initCN() {
 	messages[LanguageCN] = map[string]string{
 		// Common
-		"app_name":                 "TmpLink 文件上传工具",
+		"app_name":                 "钛盘文件上传工具",
 		"loading":                  "正在加载中...",
 		"error":                    "错误",
 		"warning":                  "警告",
@@ -19,7 +19,7 @@ func initCN() {
 		"readonly":                 "只读",
 		
 		// Auth & User
-		"enter_api_token":          "请输入TmpLink API Token",
+		"enter_api_token":          "请输入钛盘 API Token",
 		"user_info_section":        "用户信息",
 		"user_email":               "电子邮箱",
 		"content_count":            "内容统计",
@@ -27,12 +27,12 @@ func initCN() {
 		"folders":                  "文件夹",
 		"config_section":           "配置信息",
 		"account_language":         "账号语言",
-		"token_validation_success": "Token已成功保存并验证 (UID: %s)",
-		"token_validation_error":   "Token验证失败: %v",
-		"token_validation_failed":  "❌ Token验证失败!",
+		"token_validation_success": "Token 已成功保存并验证 (UID: %s)",
+		"token_validation_error":   "Token 验证失败: %v",
+		"token_validation_failed":  "❌ Token 验证失败!",
 		"token_error_message":      "❗ 错误信息: %v",
-		"token_help_message":       "💡 请使用 -set-token 命令重新设置有效的API Token",
-		"validating_token":         "正在验证Token有效性...",
+		"token_help_message":       "💡 请使用 -set-token 命令重新设置有效的 API Token",
+		"validating_token":         "正在验证 Token 有效性...",
 		"token_validation_success_mark": " ✅",
 		"user_not_logged_in":       "用户: 未登录",
 		"user_info":                "用户",
@@ -116,10 +116,10 @@ func initCN() {
 		"nav_error_hints":          "• Enter: 重试 • Esc: 返回",
 		
 		// CLI Flags & Arguments
-		"cli_usage":                "TmpLink CLI - 钉盘文件上传工具",
+		"cli_usage":                "钛盘 CLI - 钛盘文件上传工具",
 		"cli_file_path":            "要上传的文件路径 (必需)",
-		"cli_api_token":            "TmpLink API token (可选，优先使用已保存的token)",
-		"cli_set_token":            "设置并保存API token",
+		"cli_api_token":            "钛盘 API token (可选，优先使用已保存的 token)",
+		"cli_set_token":            "设置并保存 API token",
 		"cli_set_model":            "设置并保存默认文件有效期 (0=24小时, 1=3天, 2=7天, 99=无限期)",
 		"cli_set_dir_id":           "设置并保存默认目录ID",
 		"cli_upload_server":        "强制指定上传服务器地址 (可选，留空自动选择)",
@@ -248,7 +248,7 @@ func initCN() {
 		"language_set_to":          "语言设置已保存为",
 		
 		// Config status
-		"config_status_title":      "--- TmpLink CLI 配置状态 ---",
+		"config_status_title":      "--- 钛盘 CLI 配置状态 ---",
 		"config_token":             "Token",
 		"config_token_valid_short":       "✅ 有效 (UID: %s)",
 		"config_token_invalid_short":     "❌ 无效",

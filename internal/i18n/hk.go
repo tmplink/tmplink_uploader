@@ -4,7 +4,7 @@ package i18n
 func initHK() {
 	messages[LanguageHK] = map[string]string{
 		// Common
-		"app_name":                 "TmpLink 檔案上傳工具",
+		"app_name":                 "鐵盤檔案上傳工具",
 		"loading":                  "正在載入中...",
 		"error":                    "錯誤",
 		"warning":                  "警告",
@@ -19,19 +19,19 @@ func initHK() {
 		"readonly":                 "唯讀",
 		
 		// Auth & User
-		"enter_api_token":          "請輸入TmpLink API Token",
+		"enter_api_token":          "請輸入鐵盤 API Token",
 		"user_info_section":        "用戶資料",
 		"user_email":               "電子郵件",
 		"content_count":            "內容統計",
 		"files":                    "檔案",
 		"folders":                  "資料夾",
 		"config_section":           "設定資料",
-		"token_validation_success": "Token已成功儲存並驗證 (UID: %s)",
-		"token_validation_error":   "Token驗證失敗: %v",
-		"token_validation_failed":  "❌ Token驗證失敗!",
+		"token_validation_success": "Token 已成功儲存並驗證 (UID: %s)",
+		"token_validation_error":   "Token 驗證失敗: %v",
+		"token_validation_failed":  "❌ Token 驗證失敗!",
 		"token_error_message":      "❗ 錯誤訊息: %v",
-		"token_help_message":       "💡 請使用 -set-token 命令重新設置有效的API Token",
-		"validating_token":         "正在驗證Token有效性...",
+		"token_help_message":       "💡 請使用 -set-token 命令重新設置有效的 API Token",
+		"validating_token":         "正在驗證 Token 有效性...",
 		"token_validation_success_mark": " ✅",
 		"user_not_logged_in":       "用戶: 未登入",
 		"user_info":                "用戶",
@@ -96,11 +96,11 @@ func initHK() {
 		
 		// Error Messages
 		"sync_user_settings":       "正在同步用戶設定...",
-		"cli_usage":                "TmpLink CLI - 鐵盤文件上傳工具",
+		"cli_usage":                "鐵盤 CLI - 鐵盤文件上傳工具",
 		"cli_language":             "介面語言 (cn/en/hk/jp)",
 		"cli_set_language":         "設定並儲存介面語言 (cn/en/hk/jp)",
 		"language_set_to":          "語言設定已儲存為",
-		"api_validation_failed":     "API驗證失敗: %s",
+		"api_validation_failed":     "API 驗證失敗: %s",
 		"create_request_failed":    "創建請求失敗: %v",
 		"send_request_failed":     "發送請求失敗: %v",
 		"server_error_status":     "伺服器返回錯誤狀態碼: %d",
@@ -129,7 +129,7 @@ func initHK() {
 		"dir_id_set":               "預設目錄ID已設置為: %s",
 		
 		// Config status
-		"config_status_title":      "--- TmpLink CLI 配置狀態 ---",
+		"config_status_title":      "--- 鐵盤 CLI 配置狀態 ---",
 		"config_token":             "Token",
 		"config_token_valid_short":       "✅ 有效 (UID: %s)",
 		"config_token_invalid_short":     "❌ 無效",
