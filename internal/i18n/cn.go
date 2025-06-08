@@ -20,6 +20,13 @@ func initCN() {
 		
 		// Auth & User
 		"enter_api_token":          "请输入TmpLink API Token",
+		"user_info_section":        "用户信息",
+		"user_email":               "电子邮箱",
+		"content_count":            "内容统计",
+		"files":                    "文件",
+		"folders":                  "文件夹",
+		"config_section":           "配置信息",
+		"account_language":         "账号语言",
 		"token_validation_success": "Token已成功保存并验证 (UID: %s)",
 		"token_validation_error":   "Token验证失败: %v",
 		"token_validation_failed":  "❌ Token验证失败!",
@@ -28,10 +35,13 @@ func initCN() {
 		"validating_token":         "正在验证Token有效性...",
 		"token_validation_success_mark": " ✅",
 		"user_not_logged_in":       "用户: 未登录",
-		"user_info":                "用户: %s",
+		"user_info":                "用户",
 		"user_sponsored":           " ✨ (赞助者)",
 		"user_regular":             " (普通用户)",
-		"storage_info":             "存储: %.1fGB/%.1fGB (%.1f%%)",
+			"user_level_info":          "等级: %s",
+			"user_since":               "注册时间: %s",
+			"sponsor_expires":          "到期时间: %s",
+		"storage_info":             "存储: %.2fGB/%.2fGB (%.1f%%)",
 		"storage_loading":          "存储信息: 加载中...",
 		"get_user_info_failed":     "获取用户信息失败: %s",
 		
@@ -46,6 +56,11 @@ func initCN() {
 		"show_hidden_files":        " (显示隐藏文件)",
 		"file_browser_legend":      "📁目录 📄文件 🟡等待 🔵上传中 🟢已完成 🔴失败",
 		"directory_empty_loading":  "目录为空或正在加载...",
+			"current_directory":         "当前目录",
+			"file_uploading_status":      "文件正在上传中",
+			"file_completed_status":      "文件已上传完成",
+			"file_in_list_status":        "文件已在上传列表中",
+			"token_input_help":          "• Enter: 继续 • Ctrl+C: 退出",
 		
 		// Upload Settings
 		"settings_title":           "上传设置",
@@ -101,6 +116,7 @@ func initCN() {
 		"nav_error_hints":          "• Enter: 重试 • Esc: 返回",
 		
 		// CLI Flags & Arguments
+		"cli_usage":                "TmpLink CLI - 钉盘文件上传工具",
 		"cli_file_path":            "要上传的文件路径 (必需)",
 		"cli_api_token":            "TmpLink API token (可选，优先使用已保存的token)",
 		"cli_set_token":            "设置并保存API token",
@@ -119,8 +135,17 @@ func initCN() {
 		"cli_check_update":         "检查是否有新版本可用",
 		"cli_auto_update":          "自动检查并下载更新",
 		"cli_show_version":         "显示当前版本号",
+		"cli_language":             "界面语言 (cn/en/hk/jp)",
+		"cli_set_language":         "设置并保存界面语言 (cn/en/hk/jp)",
 		
 		// Error Messages
+		"api_validation_failed":     "API验证失败: %s",
+		"create_request_failed":    "创建请求失败: %v",
+		"send_request_failed":     "发送请求失败: %v",
+		"server_error_status":     "服务器返回错误状态码: %d",
+		"read_response_failed":    "读取响应失败: %v",
+		"parse_response_failed":   "解析响应失败: %v (原始响应: %s)",
+		"unknown_error":           "未知错误",
 		"error_missing_file":       "错误: 缺少必需参数 -file",
 		"error_token_not_found":    "错误: 未找到token，请使用 -token 参数或先用 -set-token 保存token",
 		"error_chunk_size_range":   "错误: 分块大小必须在1-99MB之间，当前值: %dMB",
@@ -209,6 +234,7 @@ func initCN() {
 		
 		// Initialization
 		"initializing":             "正在初始化...",
+		"sync_user_settings":       "正在同步用户设置...",
 		
 		// Default setting values for expiry models
 		"expiry_24h":               "24小时",
@@ -219,5 +245,18 @@ func initCN() {
 		// Model values set
 		"model_set":                "默认文件有效期已设置为: %s",
 		"dir_id_set":               "默认目录ID已设置为: %s",
+		"language_set_to":          "语言设置已保存为",
+		
+		// Config status
+		"config_status_title":      "--- TmpLink CLI 配置状态 ---",
+		"config_token":             "Token",
+		"config_token_valid_short":       "✅ 有效 (UID: %s)",
+		"config_token_invalid_short":     "❌ 无效",
+		"config_token_not_set":     "Token: ❓ 未设置",
+		"config_model":             "默认文件有效期",
+		"config_dir_id_default":            "默认目录ID",
+		"config_language_setting":  "语言设置",
+		"config_language_current":  "当前使用",
+		"config_language_auto":     "自动检测",
 	}
 }

@@ -20,6 +20,13 @@ func initJP() {
 		
 		// Auth & User
 		"enter_api_token":          "TmpLink APIトークンを入力してください",
+		"user_info_section":        "ユーザー情報",
+		"user_email":               "メール",
+		"content_count":            "コンテンツ",
+		"files":                    "ファイル",
+		"folders":                  "フォルダ",
+		"config_section":           "設定情報",
+		"account_language":         "アカウント言語",
 		"token_validation_success": "トークンの保存と検証が完了しました (UID: %s)",
 		"token_validation_error":   "トークンの検証に失敗しました: %v",
 		"token_validation_failed":  "❌ トークン検証に失敗しました！",
@@ -28,10 +35,13 @@ func initJP() {
 		"validating_token":         "トークンを検証中...",
 		"token_validation_success_mark": " ✅",
 		"user_not_logged_in":       "ユーザー: ログインしていません",
-		"user_info":                "ユーザー: %s",
+		"user_info":                "ユーザー",
 		"user_sponsored":           " ✨ (スポンサー)",
 		"user_regular":             " (一般ユーザー)",
-		"storage_info":             "ストレージ: %.1fGB/%.1fGB (%.1f%%)",
+			"user_level_info":          "レベル: %s",
+			"user_since":               "登録日: %s",
+			"sponsor_expires":          "期限: %s",
+		"storage_info":             "ストレージ: %.2fGB/%.2fGB (%.1f%%)",
 		"storage_loading":          "ストレージ情報: 読み込み中...",
 		"get_user_info_failed":     "ユーザー情報の取得に失敗しました: %s",
 		
@@ -122,6 +132,18 @@ func initJP() {
 		"cli_show_version":         "現在のバージョンを表示",
 		
 		// Error Messages
+		"sync_user_settings":       "ユーザー設定を同期中...",
+		"language_set_to":          "言語設定が保存されました",
+		"cli_usage":                "TmpLink CLI - TmpLink用ファイルアップロードツール",
+		"cli_language":             "インターフェース言語 (cn/en/hk/jp)",
+		"cli_set_language":         "インターフェース言語を設定して保存 (cn/en/hk/jp)",
+		"api_validation_failed":     "API検証失敗: %s",
+		"create_request_failed":    "リクエストの作成に失敗: %v",
+		"send_request_failed":     "リクエストの送信に失敗: %v",
+		"server_error_status":     "サーバーがエラーステータスコードを返しました: %d",
+		"read_response_failed":    "応答の読み込みに失敗: %v",
+		"parse_response_failed":   "応答の解析に失敗: %v (生の応答: %s)",
+		"unknown_error":           "不明なエラー",
 		"error_missing_file":       "エラー: 必須パラメータ -file が指定されていません",
 		"error_token_not_found":    "エラー: トークンが見つかりません。-token パラメータで指定するか、先に -set-token で保存してください",
 		"error_chunk_size_range":   "エラー: チャンクサイズは1〜99MBの間である必要があります。現在: %dMB",
@@ -147,5 +169,22 @@ func initJP() {
 		// Config debug
 		"config_debug_on":          "オン",
 		"config_debug_off":         "オフ",
+		
+		// Config status
+		"config_status_title":      "--- TmpLink CLI 設定状態 ---",
+		"config_token":             "Token",
+		"config_token_valid_short":       "✅ 有効 (UID: %s)",
+		"config_token_invalid_short":     "❌ 無効",
+		"config_token_not_set":     "Token: ❓ 未設定",
+		"config_model":             "デフォルトの有効期限",
+		"config_dir_id_default":            "デフォルトのディレクトリID",
+		"config_language_setting":  "言語設定",
+		"config_language_current":  "現在の言語",
+		"config_language_auto":     "自動検出",
+			"current_directory":         "現在のディレクトリ",
+			"file_uploading_status":      "ファイルは現在アップロード中です",
+			"file_completed_status":      "ファイルのアップロードが完了しました",
+			"file_in_list_status":        "ファイルは既にアップロードリストに存在します",
+			"token_input_help":          "• Enter: 続行 • Ctrl+C: 終了",
 	}
 }

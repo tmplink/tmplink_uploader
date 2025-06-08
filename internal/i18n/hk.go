@@ -20,6 +20,12 @@ func initHK() {
 		
 		// Auth & User
 		"enter_api_token":          "請輸入TmpLink API Token",
+		"user_info_section":        "用戶資料",
+		"user_email":               "電子郵件",
+		"content_count":            "內容統計",
+		"files":                    "檔案",
+		"folders":                  "資料夾",
+		"config_section":           "設定資料",
 		"token_validation_success": "Token已成功儲存並驗證 (UID: %s)",
 		"token_validation_error":   "Token驗證失敗: %v",
 		"token_validation_failed":  "❌ Token驗證失敗!",
@@ -28,10 +34,13 @@ func initHK() {
 		"validating_token":         "正在驗證Token有效性...",
 		"token_validation_success_mark": " ✅",
 		"user_not_logged_in":       "用戶: 未登入",
-		"user_info":                "用戶: %s",
+		"user_info":                "用戶",
 		"user_sponsored":           " ✨ (贊助者)",
 		"user_regular":             " (普通用戶)",
-		"storage_info":             "儲存: %.1fGB/%.1fGB (%.1f%%)",
+			"user_level_info":          "級別: %s",
+			"user_since":               "註冊時間: %s",
+			"sponsor_expires":          "到期時間: %s",
+		"storage_info":             "儲存: %.2fGB/%.2fGB (%.1f%%)",
 		"storage_loading":          "儲存訊息: 載入中...",
 		"get_user_info_failed":     "獲取用戶信息失敗: %s",
 		
@@ -85,6 +94,21 @@ func initHK() {
 		"column_server":            "伺服器",
 		"column_status":            "狀態",
 		
+		// Error Messages
+		"sync_user_settings":       "正在同步用戶設定...",
+		"cli_usage":                "TmpLink CLI - 鐵盤文件上傳工具",
+		"cli_language":             "介面語言 (cn/en/hk/jp)",
+		"cli_set_language":         "設定並儲存介面語言 (cn/en/hk/jp)",
+		"language_set_to":          "語言設定已儲存為",
+		"api_validation_failed":     "API驗證失敗: %s",
+		"create_request_failed":    "創建請求失敗: %v",
+		"send_request_failed":     "發送請求失敗: %v",
+		"server_error_status":     "伺服器返回錯誤狀態碼: %d",
+		"read_response_failed":    "讀取回應失敗: %v",
+		"parse_response_failed":   "解析回應失敗: %v (原始回應: %s)",
+		"unknown_error":           "未知錯誤",
+		"error_missing_file":      "錯誤: 缺少必需參數 -file",
+
 		// Status Translations
 		"status_starting":          "啟動中",
 		"status_waiting":           "等待中",
@@ -103,5 +127,22 @@ func initHK() {
 		// Model values set
 		"model_set":                "預設檔案有效期已設置為: %s",
 		"dir_id_set":               "預設目錄ID已設置為: %s",
+		
+		// Config status
+		"config_status_title":      "--- TmpLink CLI 配置狀態 ---",
+		"config_token":             "Token",
+		"config_token_valid_short":       "✅ 有效 (UID: %s)",
+		"config_token_invalid_short":     "❌ 無效",
+		"config_token_not_set":     "Token: ❓ 未設置",
+		"config_model":             "預設檔案有效期",
+		"config_dir_id_default":            "預設目錄ID",
+		"config_language_setting":  "語言設置",
+		"config_language_current":  "當前使用",
+		"config_language_auto":     "自動檢測",
+			"current_directory":         "當前目錄",
+			"file_uploading_status":      "檔案正在上傳中",
+			"file_completed_status":      "檔案已上傳完成",
+			"file_in_list_status":        "檔案已在上傳列表中",
+			"token_input_help":          "• Enter: 繼續 • Ctrl+C: 退出",
 	}
 }

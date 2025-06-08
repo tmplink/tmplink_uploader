@@ -20,6 +20,13 @@ func initEN() {
 		
 		// Auth & User
 		"enter_api_token":          "Please enter TmpLink API Token",
+		"user_info_section":        "User Information",
+		"user_email":               "Email",
+		"content_count":            "Content",
+		"files":                    "files",
+		"folders":                  "folders",
+		"config_section":           "Configuration",
+		"account_language":         "Account Language",
 		"token_validation_success": "Token successfully saved and validated (UID: %s)",
 		"token_validation_error":   "Token validation failed: %v",
 		"token_validation_failed":  "❌ Token validation failed!",
@@ -28,10 +35,13 @@ func initEN() {
 		"validating_token":         "Validating Token...",
 		"token_validation_success_mark": " ✅",
 		"user_not_logged_in":       "User: Not logged in",
-		"user_info":                "User: %s",
+		"user_info":                "User",
 		"user_sponsored":           " ✨ (Sponsor)",
 		"user_regular":             " (Regular user)",
-		"storage_info":             "Storage: %.1fGB/%.1fGB (%.1f%%)",
+			"user_level_info":          "Level: %s",
+			"user_since":               "Member since: %s",
+			"sponsor_expires":          "Expires: %s",
+		"storage_info":             "Storage: %.2fGB/%.2fGB (%.1f%%)",
 		"storage_loading":          "Storage info: Loading...",
 		"get_user_info_failed":     "Failed to get user info: %s",
 		
@@ -46,6 +56,11 @@ func initEN() {
 		"show_hidden_files":        " (Show hidden files)",
 		"file_browser_legend":      "📁Directory 📄File 🟡Waiting 🔵Uploading 🟢Completed 🔴Failed",
 		"directory_empty_loading":  "Directory is empty or loading...",
+			"current_directory":         "Current directory",
+			"file_uploading_status":      "File is currently uploading",
+			"file_completed_status":      "File upload completed",
+			"file_in_list_status":        "File is already in upload list",
+			"token_input_help":          "• Enter: Continue • Ctrl+C: Quit",
 		
 		// Upload Settings
 		"settings_title":           "Upload Settings",
@@ -101,6 +116,7 @@ func initEN() {
 		"nav_error_hints":          "• Enter: Retry • Esc: Back",
 		
 		// CLI Flags & Arguments
+		"cli_usage":                "TmpLink CLI - File Upload Tool for TmpLink",
 		"cli_file_path":            "Path to file to upload (required)",
 		"cli_api_token":            "TmpLink API token (optional, saved token used if available)",
 		"cli_set_token":            "Set and save API token",
@@ -119,8 +135,17 @@ func initEN() {
 		"cli_check_update":         "Check if new version is available",
 		"cli_auto_update":          "Automatically check and download updates",
 		"cli_show_version":         "Show current version",
+		"cli_language":             "Interface language (cn/en/hk/jp)",
+		"cli_set_language":         "Set and save interface language (cn/en/hk/jp)",
 		
 		// Error Messages
+		"api_validation_failed":     "API validation failed: %s",
+		"create_request_failed":    "Failed to create request: %v",
+		"send_request_failed":     "Failed to send request: %v",
+		"server_error_status":     "Server returned error status code: %d",
+		"read_response_failed":    "Failed to read response: %v",
+		"parse_response_failed":   "Failed to parse response: %v (raw response: %s)",
+		"unknown_error":           "Unknown error",
 		"error_missing_file":       "Error: Missing required parameter -file",
 		"error_token_not_found":    "Error: Token not found, use -token parameter or set with -set-token first",
 		"error_chunk_size_range":   "Error: Chunk size must be between 1-99MB, current value: %dMB",
@@ -209,6 +234,7 @@ func initEN() {
 		
 		// Initialization
 		"initializing":             "Initializing...",
+		"sync_user_settings":       "Synchronizing user settings...",
 		
 		// Default setting values for expiry models
 		"expiry_24h":               "24 hours",
@@ -219,5 +245,18 @@ func initEN() {
 		// Model values set
 		"model_set":                "Default expiry period set to: %s",
 		"dir_id_set":               "Default directory ID set to: %s",
+		"language_set_to":          "Language set to",
+		
+		// Config status
+		"config_status_title":      "--- TmpLink CLI Configuration Status ---",
+		"config_token":             "Token",
+		"config_token_valid_short":       "✅ Valid (UID: %s)",
+		"config_token_invalid_short":     "❌ Invalid",
+		"config_token_not_set":     "Token: ❓ Not set",
+		"config_model":             "Default expiration period",
+		"config_dir_id_default":            "Default directory ID",
+		"config_language_setting":  "Language setting",
+		"config_language_current":  "Current language",
+		"config_language_auto":     "Auto-detect",
 	}
 }

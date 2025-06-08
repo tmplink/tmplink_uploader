@@ -47,6 +47,11 @@ type UserInfo struct {
 	TotalSpace  int64  `json:"total_space"`
 	IsSponsored bool   `json:"is_sponsored"`
 	UID         string `json:"uid"`
+	FileCount   int64  `json:"file_count"`   // 文件数量
+	FolderCount int64  `json:"folder_count"` // 文件夹数量
+	UserLevel   string `json:"user_level"`   // 用户等级
+	CreateTime  string `json:"create_time"`  // 账户创建时间
+	ExpiryTime  string `json:"expiry_time"`  // 赞助过期时间（如果适用）
 }
 
 // 上传服务器信息
@@ -392,6 +397,14 @@ func NewModel(cliPath string) Model {
 
 // Init 初始化命令
 func (m Model) Init() tea.Cmd {
+	// 首先初始化为英语，以确保在错误时能正确显示
+	i18n.InitLanguage(i18n.LanguageEN)
+	
+	// 加载配置文件中的语言设置
+	if m.config.Language != "" {
+		i18n.InitLanguage(i18n.Language(m.config.Language))
+	}
+	
 	var cmds []tea.Cmd
 	
 	cmds = append(cmds, textinput.Blink)
@@ -791,11 +804,11 @@ func (m Model) isFileUploadAllowed(filePath string) (bool, string) {
 	// 其他状态都不允许重复上传
 	switch status {
 	case "starting", "pending", "uploading":
-		return false, "文件正在上传中"
+		return false, i18n.T("file_uploading_status")
 	case "completed":
-		return false, "文件已上传完成"
+		return false, i18n.T("file_completed_status")
 	default:
-		return false, "文件已在上传列表中"
+		return false, i18n.T("file_in_list_status")
 	}
 }
 
@@ -833,14 +846,14 @@ func (m Model) handleFileSelection() (tea.Model, tea.Cmd) {
 		// 验证文件大小限制 (50GB)
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
-			m.err = fmt.Errorf("无法获取文件信息: %v", err)
+			m.err = fmt.Errorf(i18n.T("cannot_get_file_info"), err)
 			m.state = StateError
 			return m, nil
 		}
 		
 		const maxFileSize = 50 * 1024 * 1024 * 1024 // 50GB
 		if fileInfo.Size() > maxFileSize {
-			m.err = fmt.Errorf("文件大小超出限制，最大支持50GB，当前文件: %.2fGB", 
+			m.err = fmt.Errorf(i18n.T("file_size_exceeded"), 
 				float64(fileInfo.Size())/(1024*1024*1024))
 			m.state = StateError
 			return m, nil
@@ -1193,15 +1206,15 @@ func (m *Model) updateUploadTable() {
 		statusStr := task.Status
 		switch task.Status {
 		case "starting":
-			statusStr = "启动中"
+			statusStr = i18n.T("status_starting")
 		case "pending":
-			statusStr = "等待中"
+			statusStr = i18n.T("status_waiting")
 		case "uploading":
-			statusStr = "上传中"
+			statusStr = i18n.T("status_uploading")
 		case "completed":
-			statusStr = "已完成"
+			statusStr = i18n.T("status_completed")
 		case "failed":
-			statusStr = "失败"
+			statusStr = i18n.T("status_failed")
 		}
 		
 		// 速度显示（上传中和已完成都显示最终速度）
@@ -1217,7 +1230,7 @@ func (m *Model) updateUploadTable() {
 		// 服务器名称显示
 		serverStr := task.ServerName
 		if serverStr == "" {
-			serverStr = "未知"
+			serverStr = i18n.T("unknown")
 		}
 		
 		row := table.Row{
@@ -1279,22 +1292,34 @@ func (m Model) renderStatusBar() string {
 	
 	var lines []string
 	
-	// 第一行：用户信息和认证状态
+	// 第一行：用户信息、等级和认证状态
 	var line1 string
 	if m.userInfo.Username != "" {
 		userText := i18n.T("user_info", m.userInfo.Username)
+		
+		// 添加用户等级信息（如果有）
+		if m.userInfo.UserLevel != "" {
+			userText += fmt.Sprintf(" [%s]", m.userInfo.UserLevel)
+		}
+		
+		// 添加赞助状态
 		if m.userInfo.IsSponsored {
 			userText += i18n.T("user_sponsored")
+			// 如果有过期时间，显示
+			if m.userInfo.ExpiryTime != "" {
+				userText += fmt.Sprintf(" (%s)", m.userInfo.ExpiryTime)
+			}
 		} else {
 			userText += i18n.T("user_regular")
 		}
+		
 		line1 = userText
 	} else {
 		line1 = i18n.T("user_not_logged_in")
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line1))
 	
-	// 第二行：存储信息
+	// 第二行：存储信息和文件数量
 	var line2 string
 	if m.userInfo.TotalSpace > 0 {
 		usedGB := float64(m.userInfo.UsedSpace) / (1024 * 1024 * 1024)
@@ -1305,6 +1330,14 @@ func (m Model) renderStatusBar() string {
 		
 		// 构建存储信息行
 		storageText := i18n.T("storage_info", usedGB, totalGB, usagePercent)
+		
+		// 添加文件数量信息
+		if m.userInfo.FileCount > 0 || m.userInfo.FolderCount > 0 {
+			fileText := fmt.Sprintf(" | %d %s, %d %s", 
+				m.userInfo.FileCount, i18n.T("files"),
+				m.userInfo.FolderCount, i18n.T("folders"))
+			storageText += fileText
+		}
 		
 		// 添加上传状态（如果有）
 		if m.activeUploads > 0 {
@@ -1510,7 +1543,7 @@ func (m Model) renderMainView() string {
 	}
 	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("当前目录: %s\n", m.currentDir))
+	s.WriteString(fmt.Sprintf("%s: %s\n", i18n.T("current_directory"), m.currentDir))
 	s.WriteString(helpStyle.Render(i18n.T("file_browser_legend") + "\n\n"))
 	
 	// 文件列表
@@ -1710,11 +1743,11 @@ func (m Model) renderSettings() string {
 func (m Model) renderUploadList() string {
 	var s strings.Builder
 	
-	s.WriteString(titleStyle.Render("上传管理器"))
+	s.WriteString(titleStyle.Render(i18n.T("upload_manager_title")))
 	s.WriteString("\n\n")
 	
 	if len(m.uploadTasks) == 0 {
-		s.WriteString("暂无上传任务")
+		s.WriteString(i18n.T("no_upload_tasks"))
 	} else {
 		s.WriteString(m.uploadTable.View())
 	}
@@ -1726,13 +1759,13 @@ func (m Model) renderUploadList() string {
 func (m Model) renderError() string {
 	var s strings.Builder
 	
-	s.WriteString(titleStyle.Render("错误"))
+	s.WriteString(titleStyle.Render(i18n.T("error")))
 	s.WriteString("\n\n")
 	if m.err != nil {
 		s.WriteString(errorStyle.Render(m.err.Error()))
 	}
 	s.WriteString("\n\n")
-	s.WriteString(helpStyle.Render("• Enter: 重试 • Esc: 返回"))
+	s.WriteString(helpStyle.Render(i18n.T("nav_error_hints")))
 	
 	return s.String()
 }
@@ -1749,7 +1782,7 @@ func (m Model) startUpload(filePath, taskID, statusFile string) tea.Cmd {
 		}
 		
 		// 获取当前选中的服务器信息
-		selectedServerName := "未知"
+		selectedServerName := i18n.T("unknown")
 		selectedServerURL := ""
 		if m.serverIndex < len(m.availableServers) && len(m.availableServers) > 0 {
 			selectedServer := m.availableServers[m.serverIndex]
@@ -2087,98 +2120,184 @@ func callUserAPI(token string) (UserInfo, error) {
 		return UserInfo{}, err
 	}
 	
-	// 解析详细信息响应
-	var detailApiResp struct {
-		Status int `json:"status"`
-		Data   struct {
-			UID          int64  `json:"uid"`
-			Storage      int64  `json:"storage"`
-			StorageUsed  int64  `json:"storage_used"`
-			Sponsor      bool   `json:"sponsor"`
-			Lang         string `json:"lang,omitempty"` // API返回的用户语言设置
-		} `json:"data"`
-		Msg string `json:"msg"`
+	// 首先，尝试使用通用map解析JSON以检查实际结构
+	var rawDetailResp map[string]interface{}
+	if err := json.Unmarshal(detailBody, &rawDetailResp); err != nil {
+		return UserInfo{}, fmt.Errorf(i18n.T("parse_response_failed"), err, string(detailBody))
 	}
 	
-	if err := json.Unmarshal(detailBody, &detailApiResp); err != nil {
-		return UserInfo{}, fmt.Errorf("解析详细信息失败: %w", err)
+	// 验证API响应状态
+	status, ok := rawDetailResp["status"]
+	if !ok || status != float64(1) { // JSON解析会将数字转为float64
+		msg := i18n.T("unknown_error")
+		if msgVal, ok := rawDetailResp["msg"]; ok {
+			if msgStr, ok := msgVal.(string); ok {
+				msg = msgStr
+			}
+		}
+		return UserInfo{}, fmt.Errorf(i18n.T("api_validation_failed"), msg)
 	}
 	
-	if detailApiResp.Status != 1 {
-		return UserInfo{}, fmt.Errorf("获取详细信息失败: %s", detailApiResp.Msg)
-	}
+	// 获取用户信息
+	var uid string
+	var isSponsored bool
+	var storage, storageUsed int64
 	
-	// 如果API返回了语言设置，则尝试应用它
-	if detailApiResp.Data.Lang != "" {
-		// 尝试将API返回的lang映射到我们的语言代码
-		langCode := mapAPILangToCode(detailApiResp.Data.Lang)
+	if data, ok := rawDetailResp["data"].(map[string]interface{}); ok {
+		// 获取UID
+		if uidVal, ok := data["uid"]; ok {
+			switch v := uidVal.(type) {
+			case float64:
+				uid = fmt.Sprintf("%d", int64(v))
+			case string:
+				uid = v
+			default:
+				uid = fmt.Sprintf("%v", v)
+			}
+		}
 		
-		// 只有在有效时才更新
-		if langCode != "" {
-			config := LoadConfig()
-			
-			// 只在用户未明确设置语言时使用API返回的语言
-			if config.Language == "" {
-				config.Language = string(langCode)
-				// 静默保存，不报错以免影响主流程
-				_ = saveConfig(config)
+		// 获取存储信息
+		if storageVal, ok := data["storage"]; ok {
+			if s, ok := storageVal.(float64); ok {
+				storage = int64(s)
+			}
+		}
+		if storageUsedVal, ok := data["storage_used"]; ok {
+			if s, ok := storageUsedVal.(float64); ok {
+				storageUsed = int64(s)
+			}
+		}
+		
+		// 获取赞助状态
+		if sponsorVal, ok := data["sponsor"]; ok {
+			isSponsored = sponsorVal.(bool)
+		}
+		
+		// 尝试获取语言设置
+		if langVal, ok := data["lang"]; ok {
+			if lang, ok := langVal.(string); ok && lang != "" {
+				// 尝试将API返回的lang映射到我们的语言代码
+				langCode := mapAPILangToCode(lang)
 				
-				// 应用新的语言设置
-				i18n.InitLanguage(i18n.Language(langCode))
+				// 只有在有效时才更新
+				if langCode != "" {
+					config := LoadConfig()
+					
+					// 优先使用API返回的用户语言设置
+					// 当token无效时，我们应该默认使用英语，除非用户手动指定了语言
+					{
+						// 无论什么情况都应用新的用户语言设置
+						config.Language = string(langCode)
+						// 静默保存，不报错以免影响主流程
+						_ = saveConfig(config)
+						
+						// 应用新的语言设置
+						i18n.InitLanguage(i18n.Language(langCode))
+					}
+				}
 			}
 		}
 	}
 	
-	// 第二步：获取用户名信息
+	// 第二步：获取用户详细信息
+	username := "用户" // 默认用户名
+	var fileCount, folderCount int64
+	var userLevel, createTime, expiryTime string
+	
 	userInfoData := fmt.Sprintf("action=pf_userinfo_get&token=%s", token)
 	userInfoReq, err := http.NewRequest("POST", "https://tmplink-sec.vxtrans.com/api_v2/user", strings.NewReader(userInfoData))
-	if err != nil {
-		return UserInfo{}, err
+	if err == nil {
+		userInfoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		userInfoResp, err := client.Do(userInfoReq)
+		
+		if err == nil && userInfoResp.StatusCode == 200 {
+			defer userInfoResp.Body.Close()
+			userInfoBody, err := io.ReadAll(userInfoResp.Body)
+			
+			if err == nil {
+				// 尝试解析用户详细信息
+				var rawUserInfoResp map[string]interface{}
+				if err := json.Unmarshal(userInfoBody, &rawUserInfoResp); err == nil {
+					if status, ok := rawUserInfoResp["status"].(float64); ok && status == 1 {
+						if data, ok := rawUserInfoResp["data"].(map[string]interface{}); ok {
+							// 获取用户名
+							if nickname, ok := data["nickname"].(string); ok && nickname != "" {
+								username = nickname
+							}
+							
+							// 获取文件和文件夹数量
+							if fileCountVal, ok := data["file_count"].(float64); ok {
+								fileCount = int64(fileCountVal)
+							}
+							if folderCountVal, ok := data["folder_count"].(float64); ok {
+								folderCount = int64(folderCountVal)
+							}
+							
+							// 获取用户等级和时间信息
+							if level, ok := data["level"].(string); ok {
+								userLevel = level
+							}
+							if ctime, ok := data["create_time"].(string); ok {
+								createTime = ctime
+							}
+							if etime, ok := data["expiry_time"].(string); ok {
+								expiryTime = etime
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 	
-	userInfoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	
-	userInfoResp, err := client.Do(userInfoReq)
-	if err != nil {
-		return UserInfo{}, err
+	// 第三步：获取文件统计信息（如果前面没获取到）
+	if fileCount == 0 && folderCount == 0 {
+		statData := fmt.Sprintf("action=file_stat&token=%s", token)
+		statReq, err := http.NewRequest("POST", "https://tmplink-sec.vxtrans.com/api_v2/file", strings.NewReader(statData))
+		if err == nil {
+			statReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			statResp, err := client.Do(statReq)
+			
+			if err == nil && statResp.StatusCode == 200 {
+				defer statResp.Body.Close()
+				statBody, err := io.ReadAll(statResp.Body)
+				
+				if err == nil {
+					// 尝试解析文件统计信息
+					var rawStatResp map[string]interface{}
+					if err := json.Unmarshal(statBody, &rawStatResp); err == nil {
+						if status, ok := rawStatResp["status"].(float64); ok && status == 1 {
+							if data, ok := rawStatResp["data"].(map[string]interface{}); ok {
+								if fileCountVal, ok := data["file_count"].(float64); ok {
+									fileCount = int64(fileCountVal)
+								}
+								if folderCountVal, ok := data["folder_count"].(float64); ok {
+									folderCount = int64(folderCountVal)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
-	defer userInfoResp.Body.Close()
 	
-	if userInfoResp.StatusCode != 200 {
-		return UserInfo{}, fmt.Errorf("HTTP错误: %d", userInfoResp.StatusCode)
-	}
-	
-	userInfoBody, err := io.ReadAll(userInfoResp.Body)
-	if err != nil {
-		return UserInfo{}, err
-	}
-	
-	// 解析用户信息响应
-	var userInfoApiResp struct {
-		Status int `json:"status"`
-		Data   struct {
-			Nickname string `json:"nickname"`
-		} `json:"data"`
-		Msg string `json:"msg"`
-	}
-	
-	if err := json.Unmarshal(userInfoBody, &userInfoApiResp); err != nil {
-		return UserInfo{}, fmt.Errorf("解析用户信息失败: %w", err)
-	}
-	
-	// 如果获取用户名失败，使用默认值
-	username := "用户"
-	if userInfoApiResp.Status == 1 && userInfoApiResp.Data.Nickname != "" {
-		username = userInfoApiResp.Data.Nickname
+	if uid == "" {
+		return UserInfo{}, fmt.Errorf("无法获取用户ID (响应: %s)", string(detailBody))
 	}
 	
 	return UserInfo{
 		Username:    username,
-		Email:       "", // API似乎不返回邮箱
-		UID:         fmt.Sprintf("%d", detailApiResp.Data.UID),
-		IsSponsored: detailApiResp.Data.Sponsor,
-		UsedSpace:   detailApiResp.Data.StorageUsed,
-		TotalSpace:  detailApiResp.Data.Storage,
+		Email:       "",
+		UID:         uid,
+		IsSponsored: isSponsored,
+		UsedSpace:   storageUsed,
+		TotalSpace:  storage,
+		FileCount:   fileCount,
+		FolderCount: folderCount,
+		UserLevel:   userLevel,
+		CreateTime:  createTime,
+		ExpiryTime:  expiryTime,
 	}, nil
 }
 

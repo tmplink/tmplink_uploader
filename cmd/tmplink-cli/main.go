@@ -1,19 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -120,18 +115,37 @@ func debugPrint(config *Config, format string, args ...interface{}) {
 }
 
 // UserInfo 保存从API获取的用户信息
+// UserInfo 保存所有用户信息
+type UserInfo struct {
+	UID           string  // 用户ID
+	Username      string  // 用户名
+	Email         string  // 电子邮箱
+	IsSponsored   bool    // 是否是赞助者
+	StorageTotal  int64   // 总存储空间（字节）
+	StorageUsed   int64   // 已用存储空间（字节）
+	FileCount     int     // 文件数量
+	FolderCount   int     // 文件夹数量
+	Language      string  // 语言设置
+}
+
+// UserInfoResponse API响应结构
 type UserInfoResponse struct {
 	Status int `json:"status"`
 	Data   struct {
-		UID     int64  `json:"uid"`
-		Sponsor bool   `json:"sponsor"`
-		Lang    string `json:"lang"` // API返回的用户语言设置
+		UID         int64  `json:"uid"`
+		Sponsor     bool   `json:"sponsor"`
+		Lang        string `json:"lang"`    // API返回的用户语言设置
+		Storage     int64  `json:"storage"` // 总空间（字节）
+		StorageUsed int64  `json:"storage_used"` // 已用空间（字节）
+		Files       int    `json:"files"`   // 文件数量
+		Folders     int    `json:"folders"` // 文件夹数量
 	} `json:"data"`
 	Msg string `json:"msg"`
 }
 
-// validateTokenAndGetUID 验证token并获取用户ID
-func validateTokenAndGetUID(token, serverURL string) (string, error) {
+// getUserDetails 获取详细的用户信息
+func getUserDetails(token, serverURL string) (UserInfo, error) {
+	var userInfo UserInfo
 	client := &http.Client{Timeout: 10 * time.Second}
 	
 	// 构建请求数据
@@ -140,7 +154,7 @@ func validateTokenAndGetUID(token, serverURL string) (string, error) {
 	// 创建HTTP请求
 	req, err := http.NewRequest("POST", serverURL+"/user", strings.NewReader(formData))
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
+		return userInfo, fmt.Errorf(i18n.T("create_request_failed"), err)
 	}
 	
 	// 设置请求头
@@ -149,57 +163,152 @@ func validateTokenAndGetUID(token, serverURL string) (string, error) {
 	// 发送请求
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("发送请求失败: %w", err)
+		return userInfo, fmt.Errorf(i18n.T("send_request_failed"), err)
 	}
 	defer resp.Body.Close()
 	
 	// 检查HTTP状态码
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("服务器返回错误状态码: %d", resp.StatusCode)
+		return userInfo, fmt.Errorf(i18n.T("server_error_status"), resp.StatusCode)
 	}
 	
 	// 读取响应内容
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
+		return userInfo, fmt.Errorf(i18n.T("read_response_failed"), err)
 	}
 	
-	// 解析JSON响应
-	var apiResp UserInfoResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		// 尝试以两阶段方式解析，可能有助于诊断JSON问题
-		var rawResp map[string]interface{}
-		if jsonErr := json.Unmarshal(body, &rawResp); jsonErr != nil {
-			return "", fmt.Errorf("解析响应失败: %w (原始响应: %s)", err, string(body))
-		}
-		return "", fmt.Errorf("解析响应失败: %w (原始状态: %v)", err, rawResp["status"])
+	// 先尝试解析为通用map
+	var rawResp map[string]interface{}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return userInfo, fmt.Errorf(i18n.T("parse_response_failed"), err, string(body))
 	}
 	
 	// 验证API响应状态
-	if apiResp.Status != 1 {
-		return "", fmt.Errorf("API验证失败: %s", apiResp.Msg)
+	status, ok := rawResp["status"]
+	if !ok || status != float64(1) { // JSON解析会将数字转为float64
+		msg := i18n.T("unknown_error")
+		if msgVal, ok := rawResp["msg"]; ok {
+			if msgStr, ok := msgVal.(string); ok {
+				msg = msgStr
+			}
+		}
+		return userInfo, fmt.Errorf(i18n.T("api_validation_failed"), msg)
 	}
 	
-	// 获取用户语言设置并保存
-	if apiResp.Data.Lang != "" {
-		// 尝试将API返回的lang映射到我们的语言代码
-		langCode := mapAPILangToCode(apiResp.Data.Lang)
+	// 解析用户数据
+	if data, ok := rawResp["data"].(map[string]interface{}); ok {
+		// 获取UID
+		if uidVal, ok := data["uid"]; ok {
+			switch v := uidVal.(type) {
+			case float64:
+				userInfo.UID = fmt.Sprintf("%d", int64(v))
+			case string:
+				userInfo.UID = v
+			default:
+				userInfo.UID = fmt.Sprintf("%v", v)
+			}
+		}
 		
-		// 只有在有效时才更新
-		if langCode != "" {
-			config := loadCLIConfig()
-			
-			// 只在用户未明确设置语言时使用API返回的语言
-			if config.Language == "" {
-				config.Language = langCode
-				// 静默保存，不报错以免影响主流程
-				_ = saveCLIConfig(config)
+		// 获取赞助者状态
+		if sponsorVal, ok := data["sponsor"]; ok {
+			userInfo.IsSponsored, _ = sponsorVal.(bool)
+		}
+		
+		// 获取语言设置
+		if langVal, ok := data["lang"]; ok {
+			if lang, ok := langVal.(string); ok {
+				userInfo.Language = mapAPILangToCode(lang)
+			}
+		}
+		
+		// 获取存储信息
+		if storageVal, ok := data["storage"]; ok {
+			if s, ok := storageVal.(float64); ok {
+				userInfo.StorageTotal = int64(s)
+			}
+		}
+		if storageUsedVal, ok := data["storage_used"]; ok {
+			if s, ok := storageUsedVal.(float64); ok {
+				userInfo.StorageUsed = int64(s)
+			}
+		}
+		
+		// 获取文件和文件夹数量
+		if filesVal, ok := data["files"]; ok {
+			if f, ok := filesVal.(float64); ok {
+				userInfo.FileCount = int(f)
+			}
+		}
+		if foldersVal, ok := data["folders"]; ok {
+			if f, ok := foldersVal.(float64); ok {
+				userInfo.FolderCount = int(f)
 			}
 		}
 	}
 	
-	// 返回用户ID
-	return fmt.Sprintf("%d", apiResp.Data.UID), nil
+	// 获取用户名和邮箱信息
+	// 调用另一个API端点获取更多用户详细信息
+	userInfoData := fmt.Sprintf("action=pf_userinfo_get&token=%s", token)
+	userInfoReq, err := http.NewRequest("POST", serverURL+"/user", strings.NewReader(userInfoData))
+	if err == nil {
+		userInfoReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		userInfoResp, err := client.Do(userInfoReq)
+		
+		if err == nil && userInfoResp.StatusCode == 200 {
+			defer userInfoResp.Body.Close()
+			userInfoBody, err := io.ReadAll(userInfoResp.Body)
+			
+			if err == nil {
+				var userInfoRaw map[string]interface{}
+				if json.Unmarshal(userInfoBody, &userInfoRaw) == nil {
+					if status, ok := userInfoRaw["status"].(float64); ok && status == 1 {
+						if data, ok := userInfoRaw["data"].(map[string]interface{}); ok {
+							// 获取邮箱
+							if email, ok := data["mail"]; ok {
+								if emailStr, ok := email.(string); ok {
+									userInfo.Email = emailStr
+								}
+							}
+							
+							// 获取用户名
+							if username, ok := data["name"]; ok {
+								if nameStr, ok := username.(string); ok && nameStr != "" {
+									userInfo.Username = nameStr
+								} else {
+									userInfo.Username = "User" + userInfo.UID
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// 如果用户名仍然为空，使用UID作为名称
+	if userInfo.Username == "" {
+		userInfo.Username = "User" + userInfo.UID
+	}
+	
+	// 同时更新语言设置
+	if userInfo.Language != "" {
+		config := loadCLIConfig()
+		config.Language = userInfo.Language
+		// 静默保存
+		_ = saveCLIConfig(config)
+	}
+	
+	return userInfo, nil
+}
+
+// validateTokenAndGetUID 验证token并获取用户ID
+func validateTokenAndGetUID(token, serverURL string) (string, error) {
+	userInfo, err := getUserDetails(token, serverURL)
+	if err != nil {
+		return "", err
+	}
+	return userInfo.UID, nil
 }
 
 // mapAPILangToCode 将API返回的语言标识映射到我们的语言代码
@@ -347,6 +456,87 @@ func getProgressBarWidth() int {
 	return 40
 }
 
+// customUsage 用于自定义命令行参数的帮助信息输出，确保使用当前语言设置显示帮助文本
+func customUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), "%s\n", i18n.T("cli_usage"))
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+	flag.VisitAll(func(f *flag.Flag) {
+		var desc string
+		switch f.Name {
+		case "file":
+			desc = i18n.T("cli_file_path")
+		case "token":
+			desc = i18n.T("cli_api_token")
+		case "set-token":
+			desc = i18n.T("cli_set_token")
+		case "set-model":
+			desc = i18n.T("cli_set_model")
+		case "set-mr-id":
+			desc = i18n.T("cli_set_dir_id")
+		case "set-language":
+			desc = i18n.T("cli_set_language")
+		case "upload-server":
+			desc = i18n.T("cli_upload_server")
+		case "server-name":
+			desc = i18n.T("cli_server_name")
+		case "chunk-size":
+			desc = i18n.T("cli_chunk_size")
+		case "status-file":
+			desc = i18n.T("cli_status_file")
+		case "task-id":
+			desc = i18n.T("cli_task_id")
+		case "model":
+			desc = i18n.T("cli_model")
+		case "mr-id":
+			desc = i18n.T("cli_dir_id")
+		case "skip-upload":
+			desc = i18n.T("cli_skip_upload")
+		case "debug":
+			desc = i18n.T("cli_debug")
+		case "status":
+			desc = i18n.T("cli_show_config")
+		case "check-update":
+			desc = i18n.T("cli_check_update")
+		case "auto-update":
+			desc = i18n.T("cli_auto_update")
+		case "version":
+			desc = i18n.T("cli_show_version")
+		case "language":
+			desc = i18n.T("cli_language")
+		default:
+			desc = f.Usage
+		}
+		
+		fmt.Fprintf(flag.CommandLine.Output(), "  -%s%s\n", f.Name, getTypeString(f))
+		fmt.Fprintf(flag.CommandLine.Output(), "    \t%s\n", desc)
+	})
+}
+
+// getTypeString 帮助函数，用于生成类型信息字符串
+func getTypeString(f *flag.Flag) string {
+	if f.DefValue == "" || f.DefValue == "false" {
+		return ""
+	}
+	
+	typeStr := ""
+	switch f.Name {
+	case "chunk-size", "model", "set-model", "skip-upload":
+		typeStr = fmt.Sprintf(" int (default %s)", f.DefValue)
+	case "mr-id":
+		typeStr = fmt.Sprintf(" string (default \"%s\")", f.DefValue)
+	case "debug", "status", "check-update", "auto-update", "version":
+		if f.DefValue == "true" {
+			typeStr = " (default true)"
+		}
+	default:
+		if f.DefValue != "false" && f.DefValue != "0" {
+			typeStr = fmt.Sprintf(" (default %s)", f.DefValue)
+		}
+	}
+	
+	return typeStr
+}
+
 func main() {
 	// 定义命令行参数
 	var (
@@ -372,7 +562,27 @@ func main() {
 		showVersion  = flag.Bool("version", false, "显示当前版本号")
 	)
 
+	// 首先将标记解析出来
 	flag.Parse()
+	
+	// 加载配置文件获取默认语言设置
+	savedConfig := loadCLIConfig()
+	
+	// 优先使用命令行参数中的语言设置
+	langSetting := *language
+	if langSetting == "" {
+		langSetting = savedConfig.Language
+		// 如果没有配置语言，则默认使用英语
+		if langSetting == "" {
+			langSetting = "en"
+		}
+	}
+	
+	// 初始化语言设置
+	i18n.InitLanguage(i18n.Language(langSetting))
+	
+	// 设置自定义的帮助信息函数
+	flag.Usage = customUsage
 
 	// 处理版本相关的情况
 	if *showVersion {
@@ -463,6 +673,9 @@ func main() {
 			config.Language = *setLanguage
 			updated = true
 			
+			// 立即更新语言设置，以便用所选的语言显示消息
+			i18n.InitLanguage(i18n.Language(*setLanguage))
+			
 			var langDisplay string
 			switch *setLanguage {
 			case "cn":
@@ -474,10 +687,10 @@ func main() {
 			case "jp":
 				langDisplay = "日本語"
 			default:
-				langDisplay = "自动检测"
+				langDisplay = i18n.T("config_language_auto")
 			}
 			
-			fmt.Printf("语言设置已保存为: %s\n", langDisplay)
+			fmt.Printf(i18n.T("language_set_to") + ": %s\n", langDisplay)
 		}
 
 		if updated {
@@ -490,30 +703,62 @@ func main() {
 		return
 	}
 
+	// 我们已经在前面初始化了语言，这里只需要获取之前的token和用户设置
+	finalToken := *token
+	if finalToken == "" {
+		finalToken = savedConfig.Token
+	}
+	// 现在我们已经准备好要使用的语言
+	i18n.InitLanguage(i18n.Language(langSetting))
+	
 	// 处理状态查询的情况
 	if *showStatus {
 		showConfigStatus()
 		return
 	}
 
-	// 加载保存的配置作为默认值
-	savedConfig := loadCLIConfig()
-	
-	// 初始化语言
-	langSetting := *language
-	if langSetting == "" {
-		langSetting = savedConfig.Language
-		// 如果没有配置语言，则默认使用英语
-		if langSetting == "" {
-			langSetting = "en"
-		}
-	}
-	i18n.InitLanguage(i18n.Language(langSetting))
-
 	// 参数优先级处理: 命令行参数 > 保存的配置 > 默认值
-	finalToken := *token
 	if finalToken == "" {
 		finalToken = savedConfig.Token
+	}
+	
+	// 根据是否是状态查询和是否有指定语言来决定是否显示加载消息
+	showSyncingMessage := *showStatus && *language == ""
+	
+	// 如果有有效token, 尝试从用户账号中获取首选语言
+	if finalToken != "" {
+		server := "https://tmplink-sec.vxtrans.com/api_v2"
+		
+		if showSyncingMessage {
+			fmt.Print(i18n.T("sync_user_settings") + "\r")
+		}
+		
+		// 调用validateTokenAndGetUID获取用户语言设置
+		// 在用户未指定语言时，使用API返回的语言设置
+		_, err := validateTokenAndGetUID(finalToken, server)
+		
+		if showSyncingMessage {
+			// 清除同步信息所在行
+			fmt.Print("\033[2K\r") // \033[2K清除整行, \r将光标返回行首
+		}
+		
+		// 如果令牌有效且用户未通过命令行参数指定语言
+		if err == nil && *language == "" {
+			// 获取更新后的配置
+			// 在validateTokenAndGetUID中，如果API返回用户语言设置，则会自动更新savedConfig.Language
+			updatedConfig := loadCLIConfig()
+			if updatedConfig.Language != "" {
+				// 使用最新的语言设置
+				langSetting = updatedConfig.Language
+			}
+		} else if err != nil {
+			// 如果令牌无效，且用户没有明确指定语言，则切换到英文
+			if *language == "" && langSetting != "en" {
+				// 切换到英文，除非用户手动设定了语言
+				langSetting = "en"
+				i18n.InitLanguage(i18n.LanguageEN) // 强制重新初始化为英文
+			}
+		}
 	}
 
 	// 检查model参数是否被显式设置
@@ -533,7 +778,7 @@ func main() {
 	}
 
 	// 验证必需参数
-	if *filePath == "" {
+	if *filePath == "" && !*showStatus && *setToken == "" && *setModel < 0 && *setMrID == "" && *setLanguage == "" && !*showVersion && !*checkUpdate && !*autoUpdate {
 		fmt.Fprintf(os.Stderr, i18n.T("error_missing_file")+"\n")
 		flag.Usage()
 		os.Exit(1)
@@ -639,7 +884,7 @@ func main() {
 
 	// 验证Token有效性
 	debugPrint(config, "验证Token有效性...")
-	if uid, err := validateTokenAndGetUID(finalToken, config.Server); err != nil {
+	if _, err := validateTokenAndGetUID(finalToken, config.Server); err != nil {
 		task.Status = "failed"
 		task.ErrorMsg = fmt.Sprintf("Token验证失败: %v", err)
 		task.UpdatedAt = time.Now()
@@ -746,34 +991,99 @@ func main() {
 func showConfigStatus() {
 	config := loadCLIConfig()
 	
-	fmt.Println("--- TmpLink CLI 配置状态 ---")
-	
-	// 显示Token状态
+	fmt.Println(i18n.T("config_status_title"))
+
+	// 显示Token状态和用户信息
 	if config.Token != "" {
-		fmt.Print("Token: ")
+		fmt.Print(i18n.T("config_token") + " ")
 		server := "https://tmplink-sec.vxtrans.com/api_v2"
-		if uid, err := validateTokenAndGetUID(config.Token, server); err != nil {
-			fmt.Println("❌ 无效")
-			fmt.Printf("错误: %v\n", err)
+		
+		// 获取详细的用户信息
+		userInfo, err := getUserDetails(config.Token, server)
+		if err != nil {
+			// Token无效
+			fmt.Println(i18n.T("config_token_invalid_short"))
+			fmt.Printf(i18n.T("error") + ": %v\n", err)
 		} else {
-			fmt.Printf("✅ 有效 (UID: %s)\n", uid)
+			// Token有效，显示详细信息
+			fmt.Printf(i18n.T("config_token_valid_short", userInfo.UID) + "\n")
+			
+			// 显示用户信息区域
+			fmt.Println("\n" + i18n.T("user_info_section") + ":")
+			
+			// 显示用户名和用户类型
+			userType := i18n.T("user_regular")
+			if userInfo.IsSponsored {
+				userType = i18n.T("user_sponsored")
+			}
+			fmt.Printf("   %s: %s%s\n", i18n.T("user_info"), userInfo.Username, userType)
+			
+			// 显示邮箱（如果有）
+			if userInfo.Email != "" {
+				fmt.Printf("   %s: %s\n", i18n.T("user_email"), userInfo.Email)
+			}
+			
+			// 显示存储信息
+			if userInfo.StorageTotal > 0 {
+				// 计算GB和百分比
+				totalGB := float64(userInfo.StorageTotal) / (1024 * 1024 * 1024)
+				usedGB := float64(userInfo.StorageUsed) / (1024 * 1024 * 1024)
+				percent := 0.0
+				if userInfo.StorageTotal > 0 {
+					percent = float64(userInfo.StorageUsed) / float64(userInfo.StorageTotal) * 100
+				}
+				
+				fmt.Printf("   %s\n", i18n.T("storage_info", usedGB, totalGB, percent))
+			}
+			
+			// 显示文件和文件夹数量
+			if userInfo.FileCount > 0 || userInfo.FolderCount > 0 {
+				fmt.Printf("   %s: %d %s, %d %s\n", 
+					i18n.T("content_count"), 
+					userInfo.FileCount, i18n.T("files"),
+					userInfo.FolderCount, i18n.T("folders"))
+			}
+			
+			// 显示用户语言设置
+			var langDisplay string
+			
+			// 使用语言代码映射获取显示名称
+			switch userInfo.Language {
+			case "cn":
+				langDisplay = "中文"
+			case "en":
+				langDisplay = "English"
+			case "hk":
+				langDisplay = "繁體中文"
+			case "jp":
+				langDisplay = "日本語"
+			case "":
+				langDisplay = i18n.T("config_language_auto")
+			default:
+				langDisplay = userInfo.Language
+			}
+			
+			if userInfo.Language != "" {
+				fmt.Printf("   %s: %s\n", i18n.T("account_language"), langDisplay)
+			}
 		}
 	} else {
-		fmt.Println("Token: ❓ 未设置")
+		fmt.Println(i18n.T("config_token_not_set"))
 	}
+	
+	// 显示配置区域
+	fmt.Println("\n" + i18n.T("config_section") + ":")
 	
 	// 显示文件有效期
-	modelDesc := map[int]string{0: "24小时", 1: "3天", 2: "7天", 99: "无限期"}
-	desc, ok := modelDesc[config.Model]
-	if !ok {
-		desc = fmt.Sprintf("未知(%d)", config.Model)
-	}
-	fmt.Printf("默认文件有效期: %s\n", desc)
+	fmt.Printf("   %s: %s\n", i18n.T("config_model"), i18n.ModelToString(config.Model))
 	
 	// 显示默认目录ID
-	fmt.Printf("默认目录ID: %s\n", config.MrID)
+	fmt.Printf("   %s: %s\n", i18n.T("config_dir_id_default"), config.MrID)
 	
-	// 显示语言设置
+	// 语言设置 - 创建单独的区域
+	fmt.Println("\n" + i18n.T("account_language") + ":")
+	
+	// 配置的语言设置，使用一致的语言代码映射
 	var langDisplay string
 	switch config.Language {
 	case "cn":
@@ -785,11 +1095,31 @@ func showConfigStatus() {
 	case "jp":
 		langDisplay = "日本語"
 	case "":
-		langDisplay = "自动检测 (默认为英语)"
+		langDisplay = i18n.T("config_language_auto")
 	default:
 		langDisplay = config.Language
 	}
-	fmt.Printf("界面语言: %s\n", langDisplay)
+	
+	// 显示配置的语言设置
+	fmt.Printf("   %s: %s\n", i18n.T("config_language_setting"), langDisplay)
+	
+	// 显示当前实际使用的语言
+	currentLang := i18n.GetCurrentLanguage()
+	var actualLang string
+	
+	switch currentLang {
+	case i18n.LanguageCN:
+		actualLang = "中文"
+	case i18n.LanguageEN:
+		actualLang = "English"
+	case i18n.LanguageHK:
+		actualLang = "繁體中文"
+	case i18n.LanguageJP:
+		actualLang = "日本語"
+	default:
+		actualLang = string(currentLang)
+	}
+	fmt.Printf("   %s: %s\n", i18n.T("config_language_current"), actualLang)
 }
 
 // saveTaskStatus 保存任务状态到文件
