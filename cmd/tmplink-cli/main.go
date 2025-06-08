@@ -1095,21 +1095,70 @@ func showConfigStatus() {
 
 // getLangDisplayName 根据当前界面语言返回适当的语言显示名称
 func getLangDisplayName(langCode string) string {
-	// 这里我们返回的是英语版本的语言名称，无论界面设置如何
-	// 这样可以保证在英语界面下显示英语名称
-	switch langCode {
-	case "cn":
-		return "Chinese"
-	case "en":
-		return "English"
-	case "hk":
-		return "Traditional Chinese"
-	case "jp":
-		return "Japanese"
-	case "":
-		return "Auto-detect"
-	default:
-		return langCode
+	currentLang := i18n.GetCurrentLanguage()
+	
+	// 根据当前界面语言选择显示方式
+	switch string(currentLang) {
+	case "cn": // 中文界面
+		switch langCode {
+		case "cn":
+			return "中文"
+		case "en":
+			return "英文"
+		case "hk":
+			return "繁體中文"
+		case "jp":
+			return "日本語"
+		case "":
+			return "自动检测"
+		default:
+			return langCode
+		}
+	case "hk": // 繁体中文界面
+		switch langCode {
+		case "cn":
+			return "簡體中文"
+		case "en":
+			return "英文"
+		case "hk":
+			return "繁體中文"
+		case "jp":
+			return "日本語"
+		case "":
+			return "自動檢測"
+		default:
+			return langCode
+		}
+	case "jp": // 日语界面
+		switch langCode {
+		case "cn":
+			return "中国語(簡体字)"
+		case "en":
+			return "英語"
+		case "hk":
+			return "中国語(繁体字)"
+		case "jp":
+			return "日本語"
+		case "":
+			return "自動検出"
+		default:
+			return langCode
+		}
+	default: // 英文界面或其他界面
+		switch langCode {
+		case "cn":
+			return "Chinese"
+		case "en":
+			return "English"
+		case "hk":
+			return "Traditional Chinese"
+		case "jp":
+			return "Japanese"
+		case "":
+			return "Auto-detect"
+		default:
+			return langCode
+		}
 	}
 }
 
