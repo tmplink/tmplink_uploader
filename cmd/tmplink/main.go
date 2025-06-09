@@ -13,6 +13,12 @@ import (
 	"tmplink_uploader/internal/updater"
 )
 
+var (
+	Version   string = "dev"
+	BuildTime string = "unknown"
+	GitCommit string = "unknown"
+)
+
 func main() {
 	// 定义命令行参数
 	var (
@@ -25,12 +31,14 @@ func main() {
 
 	// 处理版本相关的情况
 	if *showVersion {
-		fmt.Printf("tmplink GUI 版本: %s\n", updater.CURRENT_VERSION)
+		fmt.Printf("tmplink GUI 版本: %s\n", Version)
+		fmt.Printf("构建时间: %s\n", BuildTime)
+		fmt.Printf("Git提交: %s\n", GitCommit)
 		return
 	}
 
 	if *checkUpdate {
-		updateInfo, err := updater.CheckForUpdate("gui")
+		updateInfo, err := updater.CheckForUpdate("gui", Version)
 		if err != nil {
 			fmt.Printf("检查更新失败: %v\n", err)
 			os.Exit(1)
@@ -48,7 +56,7 @@ func main() {
 	}
 
 	if *autoUpdate {
-		if err := updater.AutoUpdate("gui"); err != nil {
+		if err := updater.AutoUpdate("gui", Version); err != nil {
 			fmt.Printf("自动更新失败: %v\n", err)
 			os.Exit(1)
 		}
@@ -64,7 +72,7 @@ func main() {
 	}
 
 	// 启动时检查更新（后台进行，不阻塞用户操作）
-	updater.CheckUpdateOnStartup("gui")
+	updater.CheckUpdateOnStartup("gui", Version)
 
 	// 创建TUI模型
 	model := tui.NewModel(cliPath)

@@ -22,6 +22,12 @@ import (
 	"tmplink_uploader/internal/updater"
 )
 
+var (
+	Version   string = "dev"
+	BuildTime string = "unknown"
+	GitCommit string = "unknown"
+)
+
 // CLI配置文件
 type CLIConfig struct {
 	Token string `json:"token"`
@@ -272,12 +278,14 @@ func main() {
 
 	// 处理版本相关的情况
 	if *showVersion {
-		fmt.Printf("tmplink-cli 版本: %s\n", updater.CURRENT_VERSION)
+		fmt.Printf("tmplink-cli 版本: %s\n", Version)
+		fmt.Printf("构建时间: %s\n", BuildTime)
+		fmt.Printf("Git提交: %s\n", GitCommit)
 		return
 	}
 
 	if *checkUpdate {
-		updateInfo, err := updater.CheckForUpdate("cli")
+		updateInfo, err := updater.CheckForUpdate("cli", Version)
 		if err != nil {
 			fmt.Printf("检查更新失败: %v\n", err)
 			os.Exit(1)
@@ -295,7 +303,7 @@ func main() {
 	}
 
 	if *autoUpdate {
-		if err := updater.AutoUpdate("cli"); err != nil {
+		if err := updater.AutoUpdate("cli", Version); err != nil {
 			fmt.Printf("自动更新失败: %v\n", err)
 			os.Exit(1)
 		}
@@ -421,7 +429,7 @@ func main() {
 	}
 
 	// 启动时检查更新（后台进行，不阻塞用户操作）
-	updater.CheckUpdateOnStartup("cli")
+	updater.CheckUpdateOnStartup("cli", Version)
 
 	// 获取文件信息
 	fileInfo, err := os.Stat(*filePath)
