@@ -665,12 +665,13 @@ func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedIndex = 1
 		}
 		return m, nil
-	case "left":
-		// 返回上级目录
-		return m.navigateToParent()
-	case "right":
-		// 进入目录或选择文件
-		return m.handleFileSelection()
+	case "left", "right":
+		// 返回上级目录 (仅在非根目录时有效)
+		parentDir := filepath.Dir(m.currentDir)
+		if parentDir != m.currentDir { // 确保不是根目录
+			return m.navigateToParent()
+		}
+		return m, nil
 	case "t":
 		// 切换显示隐藏文件
 		m.showHidden = !m.showHidden
@@ -1584,7 +1585,23 @@ func (m Model) renderStatusBar() string {
 	var line3 string
 	switch m.state {
 	case StateMain:
-		line3 = "↑↓:选择 ←:上级 →:进入 t:隐藏文件 Tab:设置 Q:退出"
+		// 根据当前选中项目和是否能返回上级目录来显示按键提示
+		parentDir := filepath.Dir(m.currentDir)
+		
+		// 确定Enter键的动作文字
+		enterAction := "进入"
+		if len(m.files) > 0 && m.selectedIndex < len(m.files) {
+			selectedFile := m.files[m.selectedIndex]
+			if !selectedFile.IsDir {
+				enterAction = "上传"
+			}
+		}
+		
+		if parentDir != m.currentDir { // 可以返回上级目录
+			line3 = fmt.Sprintf("↑↓:选择 ←→:上级 Enter:%s t:隐藏文件 Tab:设置 Q:退出", enterAction)
+		} else { // 在根目录，无法返回上级
+			line3 = fmt.Sprintf("↑↓:选择 Enter:%s t:隐藏文件 Tab:设置 Q:退出", enterAction)
+		}
 	case StateSettings:
 		line3 = "↑↓:选择 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
 	case StateUploadList:
