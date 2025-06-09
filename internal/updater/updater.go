@@ -14,7 +14,7 @@ import (
 
 const (
 	VERSION_URL       = "https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/version.json"
-	DOWNLOAD_BASE_URL = "https://github.com/tmplink/tmplink_uploader/releases/download"
+	DOWNLOAD_BASE_URL = "https://github.com/tmplink/tmplink_uploader/raw/refs/heads/main/build"
 )
 
 type VersionInfo struct {
@@ -127,8 +127,8 @@ func CheckForUpdate(programType string, currentVersion string) (*UpdateInfo, err
 	if updateInfo.HasUpdate {
 		platform := GetPlatformString()
 		binaryName := GetBinaryName(programType)
-		updateInfo.DownloadURL = fmt.Sprintf("%s/v%s/%s/%s",
-			DOWNLOAD_BASE_URL, latestVersion, platform, binaryName)
+		updateInfo.DownloadURL = fmt.Sprintf("%s/%s/%s",
+			DOWNLOAD_BASE_URL, platform, binaryName)
 	}
 
 	return updateInfo, nil
@@ -240,8 +240,8 @@ func CheckForUpdateSilently(programType string, currentVersion string) (*UpdateI
 	if updateInfo.HasUpdate {
 		platform := GetPlatformString()
 		binaryName := GetBinaryName(programType)
-		updateInfo.DownloadURL = fmt.Sprintf("%s/v%s/%s/%s",
-			DOWNLOAD_BASE_URL, latestVersion, platform, binaryName)
+		updateInfo.DownloadURL = fmt.Sprintf("%s/%s/%s",
+			DOWNLOAD_BASE_URL, platform, binaryName)
 	}
 
 	return updateInfo, nil
