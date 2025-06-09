@@ -244,7 +244,7 @@ func NewModel(cliPath string) Model {
 
 	// 初始化token输入框
 	tokenInput := textinput.New()
-	tokenInput.Placeholder = "请输入TmpLink API Token"
+	tokenInput.Placeholder = "请输入钛盘 API Token"
 	tokenInput.Width = 50
 
 	// 初始化状态 - 如果没有有效Token，直接进入Token输入界面
@@ -1347,28 +1347,152 @@ func (m Model) View() string {
 
 // renderTokenInput 渲染token输入界面
 func (m Model) renderTokenInput() string {
-	var s strings.Builder
+	// 计算居中位置
+	windowWidth := 80
+	if m.width > 80 {
+		windowWidth = m.width - 20 // 留出边距
+		if windowWidth > 100 {
+			windowWidth = 100 // 最大宽度限制
+		}
+	}
 
-	s.WriteString(titleStyle.Render("TmpLink 文件上传工具"))
-	s.WriteString("\n\n")
+	// 创建窗口边框样式
+	windowStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(2, 4).
+		Width(windowWidth - 10)
+
+	// 标题样式
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("205")).
+		Bold(true).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	// 子标题样式
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246")).
+		Italic(true).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	// 说明文字样式
+	instructionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("250")).
+		Align(lipgloss.Left).
+		Width(windowWidth - 18).
+		MarginTop(1).
+		MarginBottom(1)
+
+	// 输入框容器样式
+	inputContainerStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(1, 2).
+		MarginTop(1).
+		MarginBottom(2).
+		Width(windowWidth - 22)
+
+	// 帮助文字样式
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	var content strings.Builder
+
+	// 标题区域
+	content.WriteString(titleStyle.Render("钛盘文件上传工具"))
+	content.WriteString("\n")
+	content.WriteString(subtitleStyle.Render("安全认证"))
+	content.WriteString("\n\n")
 
 	// 显示错误信息（如果有）
 	if m.err != nil {
-		s.WriteString(errorStyle.Render(fmt.Sprintf("❌ %s", m.err.Error())))
-		s.WriteString("\n\n")
+		errorBoxStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("196")).
+			Background(lipgloss.Color("52")).
+			Foreground(lipgloss.Color("255")).
+			Padding(1, 2).
+			Width(windowWidth - 22).
+			MarginBottom(2)
+
+		content.WriteString(errorBoxStyle.Render(fmt.Sprintf("❌ 验证失败\n\n%s", m.err.Error())))
+		content.WriteString("\n\n")
 	}
 
 	if m.isLoading {
-		s.WriteString(fmt.Sprintf("%s 正在验证Token...\n\n", m.spinner.View()))
+		// 加载状态
+		loadingStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("33")).
+			Bold(true).
+			Align(lipgloss.Center).
+			Width(windowWidth - 18)
+
+		content.WriteString(loadingStyle.Render(fmt.Sprintf("%s 正在验证Token，请稍候...", m.spinner.View())))
+		content.WriteString("\n\n")
 	} else {
-		s.WriteString("请输入您的TmpLink API Token:\n\n")
+		// 说明文字
+		instructions := `请输入您的钛盘 Token 来开始使用：
+
+1. 访问 https://tmp.link/ 并登录您的账户
+2. 点击“上传文件”按钮，然后点击“重新设定”按钮，滑动到窗口底部，点击 “使用 CLI 上传”
+3. 点击 Token 以复制到剪贴板`
+
+		content.WriteString(instructionStyle.Render(instructions))
+		content.WriteString("\n")
+
+		// 输入框标签
+		labelStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("33")).
+			Bold(true).
+			MarginBottom(1)
+
+		content.WriteString(labelStyle.Render("Token:"))
+		content.WriteString("\n")
 	}
 
-	s.WriteString(m.tokenInput.View())
-	s.WriteString("\n\n")
-	s.WriteString(helpStyle.Render("• Enter: 继续 • Ctrl+C: 退出"))
+	// 输入框
+	if !m.isLoading {
+		// 设置输入框宽度
+		m.tokenInput.Width = windowWidth - 26
+		inputContainer := inputContainerStyle.Render(m.tokenInput.View())
+		content.WriteString(inputContainer)
+	}
 
-	return s.String()
+	// 帮助信息
+	if m.isLoading {
+		content.WriteString(helpStyle.Render("请耐心等待验证完成..."))
+	} else {
+		helpText := "💡 Enter: 验证并保存  •  Ctrl+C: 退出程序"
+		content.WriteString(helpStyle.Render(helpText))
+	}
+
+	// 将内容放入窗口边框
+	window := windowStyle.Render(content.String())
+
+	// 使用 lipgloss.Place 实现完全居中
+	availableHeight := m.height
+	availableWidth := m.width
+	if availableHeight <= 0 {
+		availableHeight = 30
+	}
+	if availableWidth <= 0 {
+		availableWidth = 80
+	}
+
+	// 使用 lipgloss.Place 进行居中定位
+	centered := lipgloss.Place(
+		availableWidth,
+		availableHeight,
+		lipgloss.Center,
+		lipgloss.Center,
+		window,
+	)
+
+	return centered
 }
 
 // renderStatusBar 渲染顶部状态栏（三行布局）
@@ -1611,22 +1735,101 @@ func (m Model) renderLoading() string {
 
 // renderTokenValidationFailed 渲染Token验证失败界面
 func (m Model) renderTokenValidationFailed() string {
-	var s strings.Builder
-
-	s.WriteString(titleStyle.Render("TmpLink 文件上传工具"))
-	s.WriteString("\n\n")
-
-	// 显示简化的错误信息
-	if m.err != nil {
-		s.WriteString(errorStyle.Render(fmt.Sprintf("❌ %s", m.err.Error())))
-		s.WriteString("\n\n")
+	// 计算居中位置
+	windowWidth := 80
+	if m.width > 80 {
+		windowWidth = m.width - 20
+		if windowWidth > 100 {
+			windowWidth = 100
+		}
 	}
 
-	s.WriteString(fmt.Sprintf("%s 3秒后将返回输入界面...", m.spinner.View()))
-	s.WriteString("\n\n")
-	s.WriteString(helpStyle.Render("按任意键立即返回"))
+	// 创建窗口边框样式
+	windowStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")).
+		Padding(2, 4).
+		Width(windowWidth - 10)
 
-	return s.String()
+	// 标题样式
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196")).
+		Bold(true).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	// 子标题样式
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246")).
+		Italic(true).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	// 帮助文字样式
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	var content strings.Builder
+
+	// 标题区域
+	content.WriteString(titleStyle.Render("❌ 验证失败"))
+	content.WriteString("\n")
+	content.WriteString(subtitleStyle.Render("Token 认证出现问题"))
+	content.WriteString("\n\n")
+
+	// 显示错误信息
+	if m.err != nil {
+		errorBoxStyle := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("196")).
+			Background(lipgloss.Color("52")).
+			Foreground(lipgloss.Color("255")).
+			Padding(1, 2).
+			Width(windowWidth - 22).
+			MarginBottom(2)
+
+		content.WriteString(errorBoxStyle.Render(fmt.Sprintf("错误详情：\n\n%s", m.err.Error())))
+		content.WriteString("\n\n")
+	}
+
+	// 自动返回提示
+	loadingStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("33")).
+		Bold(true).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	content.WriteString(loadingStyle.Render(fmt.Sprintf("%s 3秒后自动返回输入界面...", m.spinner.View())))
+	content.WriteString("\n\n")
+
+	// 帮助信息
+	content.WriteString(helpStyle.Render("💡 按任意键立即返回  •  Ctrl+C: 退出程序"))
+
+	// 将内容放入窗口边框
+	window := windowStyle.Render(content.String())
+
+	// 使用 lipgloss.Place 实现完全居中
+	availableHeight := m.height
+	availableWidth := m.width
+	if availableHeight <= 0 {
+		availableHeight = 30
+	}
+	if availableWidth <= 0 {
+		availableWidth = 80
+	}
+
+	// 使用 lipgloss.Place 进行居中定位
+	centered := lipgloss.Place(
+		availableWidth,
+		availableHeight,
+		lipgloss.Center,
+		lipgloss.Center,
+		window,
+	)
+
+	return centered
 }
 
 // renderMainView 渲染主界面（文件浏览器）
