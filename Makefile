@@ -9,8 +9,13 @@ BUILD_TIME = $(shell date +"%Y-%m-%d %H:%M:%S")
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 BUILD_DIR = ./build
 
+# 从version.json读取版本号
+CLI_VERSION = $(shell grep -o '"cli_version"[[:space:]]*:[[:space:]]*"[^"]*"' version.json | grep -o '"[^"]*"$$' | tr -d '"')
+GUI_VERSION = $(shell grep -o '"gui_version"[[:space:]]*:[[:space:]]*"[^"]*"' version.json | grep -o '"[^"]*"$$' | tr -d '"')
+
 # 构建标记
-LDFLAGS = -ldflags "-X main.Version=$(GIT_COMMIT) -X 'main.BuildTime=$(BUILD_TIME)'"
+CLI_LDFLAGS = -ldflags "-X main.Version=$(CLI_VERSION) -X 'main.BuildTime=$(BUILD_TIME)' -X main.GitCommit=$(GIT_COMMIT)"
+GUI_LDFLAGS = -ldflags "-X main.Version=$(GUI_VERSION) -X 'main.BuildTime=$(BUILD_TIME)' -X main.GitCommit=$(GIT_COMMIT)"
 
 .PHONY: all build clean test run help deps lint vet fmt check install build-all build-release release
 
@@ -26,12 +31,12 @@ release: build-release
 # 构建CLI程序
 build-cli:
 	@echo "构建CLI程序..."
-	go build $(LDFLAGS) -o $(BINARY_DIR)$(CLI_BINARY) $(CLI_SOURCE)
+	go build $(CLI_LDFLAGS) -o $(BINARY_DIR)$(CLI_BINARY) $(CLI_SOURCE)
 
 # 构建GUI程序  
 build-gui:
 	@echo "构建GUI程序..."
-	go build $(LDFLAGS) -o $(BINARY_DIR)$(GUI_BINARY) $(GUI_SOURCE)
+	go build $(GUI_LDFLAGS) -o $(BINARY_DIR)$(GUI_BINARY) $(GUI_SOURCE)
 
 # 构建所有平台发布版本
 build-release: clean-build
@@ -39,32 +44,32 @@ build-release: clean-build
 	@mkdir -p $(BUILD_DIR)/{macos-intel,macos-arm64,windows-64bit,windows-32bit,linux-64bit,linux-32bit,linux-arm64}
 	
 	@echo "构建 macOS Intel..."
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=darwin GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=darwin GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(CLI_BINARY) $(CLI_SOURCE)
 	
 	@echo "构建 macOS ARM64..."
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=darwin GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=darwin GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(CLI_BINARY) $(CLI_SOURCE)
 	
 	@echo "构建 Windows 64位..."
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(GUI_BINARY).exe $(GUI_SOURCE)
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(CLI_BINARY).exe $(CLI_SOURCE)
+	GOOS=windows GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(GUI_BINARY).exe $(GUI_SOURCE)
+	GOOS=windows GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(CLI_BINARY).exe $(CLI_SOURCE)
 	
 	@echo "构建 Windows 32位..."
-	GOOS=windows GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(GUI_BINARY).exe $(GUI_SOURCE)
-	GOOS=windows GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(CLI_BINARY).exe $(CLI_SOURCE)
+	GOOS=windows GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(GUI_BINARY).exe $(GUI_SOURCE)
+	GOOS=windows GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(CLI_BINARY).exe $(CLI_SOURCE)
 	
 	@echo "构建 Linux 64位..."
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=linux GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(CLI_BINARY) $(CLI_SOURCE)
 	
 	@echo "构建 Linux 32位..."
-	GOOS=linux GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=linux GOARCH=386 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=linux GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=linux GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(CLI_BINARY) $(CLI_SOURCE)
 	
 	@echo "构建 Linux ARM64..."
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=linux GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(GUI_BINARY) $(GUI_SOURCE)
+	GOOS=linux GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(CLI_BINARY) $(CLI_SOURCE)
 	
 	@echo "所有平台构建完成！"
 
