@@ -17,9 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"tmplink_uploader/internal/updater"
+
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/term"
-	"tmplink_uploader/internal/updater"
 )
 
 var (
@@ -709,7 +710,14 @@ func workerSlice(ctx context.Context, config *Config, filePath, sha1Hash, fileNa
 
 	// 添加循环计数器，防止无限循环
 	loopCount := 0
-	maxLoops := 1000 // 允许最多1000次状态机循环
+	// 根据文件大小和分片大小动态计算最大循环次数
+	// 每个分片可能需要多次API调用（prepare + upload + 状态检查）
+	// 基础循环次数 = 分片数量 * 每个分片的平均API调用次数
+	chunkSize := int64(config.ChunkSize)
+	expectedChunks := (fileSize + chunkSize - 1) / chunkSize // 向上取整
+	maxLoops := int(expectedChunks) * 10                     // 每个分片最多允许10次循环（包括重试和状态检查）
+
+	debugPrint(config, "预计分片数: %d, 最大循环次数: %d", expectedChunks, maxLoops)
 
 	for {
 		select {
