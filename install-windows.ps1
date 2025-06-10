@@ -14,7 +14,8 @@ $ErrorActionPreference = "Stop"
 
 # 脚本参数
 $GitHubRepo = "tmplink/tmplink_uploader"
-$DownloadBase = "https://raw.githubusercontent.com/$GitHubRepo/main/build"
+$ApiBase = "https://api.github.com/repos/$GitHubRepo"
+$DownloadBase = "https://github.com/$GitHubRepo/releases/download"
 
 # 颜色函数
 function Write-Header {
@@ -87,11 +88,11 @@ function Get-Architecture {
     $arch = $env:PROCESSOR_ARCHITECTURE
     switch ($arch) {
         "AMD64" {
-            $script:ArchDir = "windows-64bit"
+            $script:ArchSuffix = "windows-amd64"
             Write-Info "检测到 64位 x86 架构"
         }
         "x86" {
-            $script:ArchDir = "windows-32bit"
+            $script:ArchSuffix = "windows-386"
             Write-Info "检测到 32位 x86 架构"
         }
         default {
@@ -99,6 +100,27 @@ function Get-Architecture {
             Write-Info "支持的架构: AMD64 (x64), x86"
             exit 1
         }
+    }
+}
+
+function Get-LatestVersion {
+    Write-Step "获取最新版本信息..."
+    
+    try {
+        # 获取最新 release 信息
+        $releaseInfo = Invoke-WebRequest -Uri "$ApiBase/releases/latest" -UseBasicParsing
+        $releaseData = $releaseInfo.Content | ConvertFrom-Json
+        
+        $script:LatestVersion = $releaseData.tag_name
+        
+        if (-not $script:LatestVersion) {
+            throw "解析版本信息失败"
+        }
+        
+        Write-Info "最新版本: $script:LatestVersion"
+    } catch {
+        Write-Error "获取版本信息失败: $($_.Exception.Message)"
+        exit 1
     }
 }
 
@@ -110,15 +132,17 @@ function Download-Binaries {
     
     $guiBinary = "tmplink.exe"
     $cliBinary = "tmplink-cli.exe"
+    $guiRemote = "tmplink-$ArchSuffix.exe"
+    $cliRemote = "tmplink-cli-$ArchSuffix.exe"
     
     try {
         Write-Info "下载 $guiBinary..."
-        $guiUrl = "$DownloadBase/$ArchDir/$guiBinary"
+        $guiUrl = "$DownloadBase/$script:LatestVersion/$guiRemote"
         $guiPath = Join-Path $TempDir $guiBinary
         Invoke-WebRequest -Uri $guiUrl -OutFile $guiPath -UseBasicParsing
         
         Write-Info "下载 $cliBinary..."
-        $cliUrl = "$DownloadBase/$ArchDir/$cliBinary"
+        $cliUrl = "$DownloadBase/$script:LatestVersion/$cliRemote"
         $cliPath = Join-Path $TempDir $cliBinary
         Invoke-WebRequest -Uri $cliUrl -OutFile $cliPath -UseBasicParsing
         
@@ -389,6 +413,7 @@ function Main {
     try {
         Test-Requirements
         Get-Architecture
+        Get-LatestVersion
         Download-Binaries
         Install-Binaries
         Add-WindowsDefenderExclusion

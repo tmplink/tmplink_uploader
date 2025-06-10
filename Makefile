@@ -41,35 +41,35 @@ build-gui:
 # 构建所有平台发布版本
 build-release: clean-build
 	@echo "构建所有平台发布版本..."
-	@mkdir -p $(BUILD_DIR)/{macos-intel,macos-arm64,windows-64bit,windows-32bit,linux-64bit,linux-32bit,linux-arm64}
+	@mkdir -p $(BUILD_DIR)
 	
 	@echo "构建 macOS Intel..."
-	GOOS=darwin GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=darwin GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/macos-intel/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=darwin GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-darwin-amd64 $(GUI_SOURCE)
+	GOOS=darwin GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-darwin-amd64 $(CLI_SOURCE)
 	
 	@echo "构建 macOS ARM64..."
-	GOOS=darwin GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=darwin GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/macos-arm64/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=darwin GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-darwin-arm64 $(GUI_SOURCE)
+	GOOS=darwin GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-darwin-arm64 $(CLI_SOURCE)
 	
 	@echo "构建 Windows 64位..."
-	GOOS=windows GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(GUI_BINARY).exe $(GUI_SOURCE)
-	GOOS=windows GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/windows-64bit/$(CLI_BINARY).exe $(CLI_SOURCE)
+	GOOS=windows GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-windows-amd64.exe $(GUI_SOURCE)
+	GOOS=windows GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-windows-amd64.exe $(CLI_SOURCE)
 	
 	@echo "构建 Windows 32位..."
-	GOOS=windows GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(GUI_BINARY).exe $(GUI_SOURCE)
-	GOOS=windows GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/windows-32bit/$(CLI_BINARY).exe $(CLI_SOURCE)
+	GOOS=windows GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-windows-386.exe $(GUI_SOURCE)
+	GOOS=windows GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-windows-386.exe $(CLI_SOURCE)
 	
 	@echo "构建 Linux 64位..."
-	GOOS=linux GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/linux-64bit/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=linux GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-amd64 $(GUI_SOURCE)
+	GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-amd64 $(CLI_SOURCE)
 	
 	@echo "构建 Linux 32位..."
-	GOOS=linux GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=linux GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/linux-32bit/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=linux GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-386 $(GUI_SOURCE)
+	GOOS=linux GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-386 $(CLI_SOURCE)
 	
 	@echo "构建 Linux ARM64..."
-	GOOS=linux GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(GUI_BINARY) $(GUI_SOURCE)
-	GOOS=linux GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(CLI_BINARY) $(CLI_SOURCE)
+	GOOS=linux GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-arm64 $(GUI_SOURCE)
+	GOOS=linux GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-arm64 $(CLI_SOURCE)
 	
 	@echo "所有平台构建完成！"
 
@@ -145,8 +145,8 @@ clean:
 # 清理发布构建文件
 clean-build:
 	@echo "清理发布构建文件..."
-	rm -rf $(BUILD_DIR)/*/$(CLI_BINARY)*
-	rm -rf $(BUILD_DIR)/*/$(GUI_BINARY)*
+	rm -f $(BUILD_DIR)/$(CLI_BINARY)-*
+	rm -f $(BUILD_DIR)/$(GUI_BINARY)-*
 
 # 安装到系统
 install: build
@@ -163,12 +163,22 @@ uninstall:
 # 创建发布包
 dist: build-release
 	@echo "创建发布包..."
-	@cd $(BUILD_DIR) && for dir in */; do \
-		platform=$${dir%/}; \
-		echo "打包 $$platform..."; \
-		tar -czf tmplink-$$platform.tar.gz $$dir; \
-	done
-	@echo "发布包创建完成，位于 $(BUILD_DIR)/ 目录"
+	@mkdir -p $(BUILD_DIR)/packages
+	@echo "打包 Darwin AMD64..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-darwin-amd64.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-darwin-amd64 $(CLI_BINARY)-darwin-amd64
+	@echo "打包 Darwin ARM64..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-darwin-arm64.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-darwin-arm64 $(CLI_BINARY)-darwin-arm64
+	@echo "打包 Windows AMD64..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-windows-amd64.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-windows-amd64.exe $(CLI_BINARY)-windows-amd64.exe
+	@echo "打包 Windows 386..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-windows-386.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-windows-386.exe $(CLI_BINARY)-windows-386.exe
+	@echo "打包 Linux AMD64..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-linux-amd64.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-linux-amd64 $(CLI_BINARY)-linux-amd64
+	@echo "打包 Linux 386..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-linux-386.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-linux-386 $(CLI_BINARY)-linux-386
+	@echo "打包 Linux ARM64..."
+	@tar -czf $(BUILD_DIR)/packages/tmplink-linux-arm64.tar.gz -C $(BUILD_DIR) $(GUI_BINARY)-linux-arm64 $(CLI_BINARY)-linux-arm64
+	@echo "发布包创建完成，位于 $(BUILD_DIR)/packages/ 目录"
 
 # 开发环境设置
 dev-setup:
@@ -184,7 +194,7 @@ status:
 	@ls -la $(CLI_BINARY) $(GUI_BINARY) 2>/dev/null || echo "  未找到本地构建文件"
 	@echo ""
 	@echo "发布构建文件:"
-	@find $(BUILD_DIR) -name "$(CLI_BINARY)*" -o -name "$(GUI_BINARY)*" 2>/dev/null | head -10 || echo "  未找到发布构建文件"
+	@ls -la $(BUILD_DIR)/$(CLI_BINARY)-* $(BUILD_DIR)/$(GUI_BINARY)-* 2>/dev/null | head -10 || echo "  未找到发布构建文件"
 
 # 显示帮助信息
 help:
