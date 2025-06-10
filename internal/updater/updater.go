@@ -8,13 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 )
 
 const (
-	VERSION_URL       = "https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/version.json"
-	DOWNLOAD_BASE_URL = "https://github.com/tmplink/tmplink_uploader/raw/refs/heads/main/build"
+	VERSION_URL           = "https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/version.json"
+	DOWNLOAD_BASE_URL     = "https://github.com/tmplink/tmplink_uploader/releases/download"
+	GITHUB_REPO          = "tmplink/tmplink_uploader"
 )
 
 type VersionInfo struct {
@@ -29,58 +29,58 @@ type UpdateInfo struct {
 	CurrentVersion string
 }
 
-// GetPlatformString returns the platform string based on runtime.GOOS and runtime.GOARCH
-func GetPlatformString() string {
+// GetPlatformSuffix returns the platform suffix based on runtime.GOOS and runtime.GOARCH
+func GetPlatformSuffix() string {
 	switch runtime.GOOS {
 	case "linux":
 		switch runtime.GOARCH {
 		case "amd64":
-			return "linux-64bit"
+			return "linux-amd64"
 		case "386":
-			return "linux-32bit"
+			return "linux-386"
 		case "arm64":
 			return "linux-arm64"
 		default:
-			return "linux-64bit"
+			return "linux-amd64"
 		}
 	case "windows":
 		switch runtime.GOARCH {
 		case "amd64":
-			return "windows-64bit"
+			return "windows-amd64"
 		case "386":
-			return "windows-32bit"
+			return "windows-386"
 		default:
-			return "windows-64bit"
+			return "windows-amd64"
 		}
 	case "darwin":
 		switch runtime.GOARCH {
 		case "amd64":
-			return "macos-intel"
+			return "darwin-amd64"
 		case "arm64":
-			return "macos-arm64"
+			return "darwin-arm64"
 		default:
-			return "macos-arm64"
+			return "darwin-arm64"
 		}
 	default:
-		return "linux-64bit"
+		return "linux-amd64"
 	}
 }
 
-// GetBinaryName returns the binary name for the given program type and platform
+// GetBinaryName returns the binary name for the given program type with platform suffix
 func GetBinaryName(programType string) string {
-	platform := GetPlatformString()
+	platformSuffix := GetPlatformSuffix()
 
-	if strings.Contains(platform, "windows") {
+	if runtime.GOOS == "windows" {
 		if programType == "cli" {
-			return "tmplink-cli.exe"
+			return fmt.Sprintf("tmplink-cli-%s.exe", platformSuffix)
 		}
-		return "tmplink.exe"
+		return fmt.Sprintf("tmplink-%s.exe", platformSuffix)
 	}
 
 	if programType == "cli" {
-		return "tmplink-cli"
+		return fmt.Sprintf("tmplink-cli-%s", platformSuffix)
 	}
-	return "tmplink"
+	return fmt.Sprintf("tmplink-%s", platformSuffix)
 }
 
 // CheckForUpdate checks if there's a newer version available
@@ -125,10 +125,9 @@ func CheckForUpdate(programType string, currentVersion string) (*UpdateInfo, err
 	}
 
 	if updateInfo.HasUpdate {
-		platform := GetPlatformString()
 		binaryName := GetBinaryName(programType)
-		updateInfo.DownloadURL = fmt.Sprintf("%s/%s/%s",
-			DOWNLOAD_BASE_URL, platform, binaryName)
+		updateInfo.DownloadURL = fmt.Sprintf("%s/v%s/%s",
+			DOWNLOAD_BASE_URL, latestVersion, binaryName)
 	}
 
 	return updateInfo, nil
@@ -238,10 +237,9 @@ func CheckForUpdateSilently(programType string, currentVersion string) (*UpdateI
 	}
 
 	if updateInfo.HasUpdate {
-		platform := GetPlatformString()
 		binaryName := GetBinaryName(programType)
-		updateInfo.DownloadURL = fmt.Sprintf("%s/%s/%s",
-			DOWNLOAD_BASE_URL, platform, binaryName)
+		updateInfo.DownloadURL = fmt.Sprintf("%s/v%s/%s",
+			DOWNLOAD_BASE_URL, latestVersion, binaryName)
 	}
 
 	return updateInfo, nil

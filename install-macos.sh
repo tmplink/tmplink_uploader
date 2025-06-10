@@ -7,7 +7,8 @@ set -e
 
 INSTALL_DIR="/usr/local/bin"
 GITHUB_REPO="tmplink/tmplink_uploader"
-DOWNLOAD_BASE="https://raw.githubusercontent.com/$GITHUB_REPO/main/build"
+API_BASE="https://api.github.com/repos/$GITHUB_REPO"
+DOWNLOAD_BASE="https://github.com/$GITHUB_REPO/releases/download"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -80,11 +81,11 @@ detect_architecture() {
     local arch=$(uname -m)
     case $arch in
         x86_64)
-            ARCH_DIR="macos-intel"
+            ARCH_SUFFIX="darwin-amd64"
             print_info "检测到 Intel Mac (x86_64)"
             ;;
         arm64)
-            ARCH_DIR="macos-arm64"
+            ARCH_SUFFIX="darwin-arm64"
             print_info "检测到 Apple Silicon Mac (ARM64)"
             ;;
         *)
@@ -95,22 +96,45 @@ detect_architecture() {
     esac
 }
 
+get_latest_version() {
+    print_step "获取最新版本信息..."
+    
+    # 获取最新 release 信息
+    local release_info
+    if ! release_info=$(curl -fsSL "$API_BASE/releases/latest"); then
+        print_error "获取版本信息失败"
+        exit 1
+    fi
+    
+    # 解析版本号 (提取 tag_name 字段)
+    LATEST_VERSION=$(echo "$release_info" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    
+    if [[ -z "$LATEST_VERSION" ]]; then
+        print_error "解析版本信息失败"
+        exit 1
+    fi
+    
+    print_info "最新版本: $LATEST_VERSION"
+}
+
 download_binaries() {
     print_step "下载二进制文件..."
     
     local temp_dir=$(mktemp -d)
     local gui_binary="tmplink"
     local cli_binary="tmplink-cli"
+    local gui_remote="tmplink-$ARCH_SUFFIX"
+    local cli_remote="tmplink-cli-$ARCH_SUFFIX"
     
     print_info "下载 $gui_binary..."
-    if ! curl -fsSL "$DOWNLOAD_BASE/$ARCH_DIR/$gui_binary" -o "$temp_dir/$gui_binary"; then
+    if ! curl -fsSL "$DOWNLOAD_BASE/$LATEST_VERSION/$gui_remote" -o "$temp_dir/$gui_binary"; then
         print_error "下载 $gui_binary 失败"
         rm -rf "$temp_dir"
         exit 1
     fi
     
     print_info "下载 $cli_binary..."
-    if ! curl -fsSL "$DOWNLOAD_BASE/$ARCH_DIR/$cli_binary" -o "$temp_dir/$cli_binary"; then
+    if ! curl -fsSL "$DOWNLOAD_BASE/$LATEST_VERSION/$cli_remote" -o "$temp_dir/$cli_binary"; then
         print_error "下载 $cli_binary 失败"
         rm -rf "$temp_dir"
         exit 1
@@ -323,6 +347,7 @@ main() {
     
     check_requirements
     detect_architecture
+    get_latest_version
     download_binaries
     remove_quarantine
     install_binaries
