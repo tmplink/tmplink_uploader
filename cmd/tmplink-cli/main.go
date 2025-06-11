@@ -29,9 +29,17 @@ var (
 	GitCommit string = "unknown"
 )
 
-// CLI配置文件
-type CLIConfig struct {
-	Token string `json:"token"`
+// 共享配置文件结构（与GUI保持一致）
+type SharedConfig struct {
+	Token              string    `json:"token"`
+	UploadServer       string    `json:"upload_server"`
+	SelectedServerName string    `json:"selected_server_name"`
+	ChunkSize          int       `json:"chunk_size"`
+	MaxConcurrent      int       `json:"max_concurrent"`
+	QuickUpload        bool      `json:"quick_upload"`
+	SkipUpload         bool      `json:"skip_upload"`
+	LastUpdateCheck    time.Time `json:"last_update_check"`
+	// CLI专用字段
 	Model int    `json:"model"`
 	MrID  string `json:"mr_id"`
 }
@@ -48,39 +56,61 @@ type Config struct {
 	Debug        bool // 调试模式
 }
 
-// getCLIConfigPath 获取CLI配置文件路径
-func getCLIConfigPath() string {
+// getSharedConfigPath 获取共享配置文件路径
+func getSharedConfigPath() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return ".tmplink_cli_config.json"
+		return ".tmplink_config.json"
 	}
-	return filepath.Join(homeDir, ".tmplink_cli_config.json")
+	return filepath.Join(homeDir, ".tmplink_config.json")
 }
 
-// loadCLIConfig 加载保存的CLI配置
-func loadCLIConfig() CLIConfig {
-	configPath := getCLIConfigPath()
+// loadSharedConfig 加载共享配置
+func loadSharedConfig() SharedConfig {
+	configPath := getSharedConfigPath()
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return CLIConfig{Model: 0, MrID: "0"} // 返回默认值
+		// 返回默认值
+		return SharedConfig{
+			ChunkSize:     3,
+			MaxConcurrent: 5,
+			QuickUpload:   true,
+			SkipUpload:    false,
+			Model:         0,
+			MrID:          "0",
+		}
 	}
 
-	var config CLIConfig
+	var config SharedConfig
 	if err := json.Unmarshal(data, &config); err != nil {
-		return CLIConfig{Model: 0, MrID: "0"} // 返回默认值
+		// 返回默认值
+		return SharedConfig{
+			ChunkSize:     3,
+			MaxConcurrent: 5,
+			QuickUpload:   true,
+			SkipUpload:    false,
+			Model:         0,
+			MrID:          "0",
+		}
 	}
 
-	// 确保MrID有默认值
+	// 确保默认值
 	if config.MrID == "" {
 		config.MrID = "0"
+	}
+	if config.ChunkSize <= 0 {
+		config.ChunkSize = 3
+	}
+	if config.MaxConcurrent <= 0 {
+		config.MaxConcurrent = 5
 	}
 
 	return config
 }
 
-// saveCLIConfig 保存CLI配置到文件
-func saveCLIConfig(config CLIConfig) error {
-	configPath := getCLIConfigPath()
+// saveSharedConfig 保存共享配置到文件
+func saveSharedConfig(config SharedConfig) error {
+	configPath := getSharedConfigPath()
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -93,20 +123,20 @@ func saveCLIConfig(config CLIConfig) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0600) // 设置较严格的权限
+	return os.WriteFile(configPath, data, 0644)
 }
 
 // 兼容性函数：用于加载token
 func loadSavedToken() string {
-	config := loadCLIConfig()
+	config := loadSharedConfig()
 	return config.Token
 }
 
 // 兼容性函数：用于保存token
 func saveToken(token string) error {
-	config := loadCLIConfig()
+	config := loadSharedConfig()
 	config.Token = token
-	return saveCLIConfig(config)
+	return saveSharedConfig(config)
 }
 
 // debugPrint 调试输出函数
@@ -313,7 +343,7 @@ func main() {
 
 	// 处理设置参数的情况
 	if *setToken != "" || *setModel >= 0 || *setMrID != "" {
-		config := loadCLIConfig()
+		config := loadSharedConfig()
 		updated := false
 
 		if *setToken != "" {
@@ -351,7 +381,7 @@ func main() {
 		}
 
 		if updated {
-			if err := saveCLIConfig(config); err != nil {
+			if err := saveSharedConfig(config); err != nil {
 				fmt.Fprintf(os.Stderr, "错误: 保存配置失败: %v\n", err)
 				os.Exit(1)
 			}
@@ -367,7 +397,7 @@ func main() {
 	}
 
 	// 加载保存的配置作为默认值
-	savedConfig := loadCLIConfig()
+	savedConfig := loadSharedConfig()
 
 	// 参数优先级处理: 命令行参数 > 保存的配置 > 默认值
 	finalToken := *token
@@ -430,7 +460,7 @@ func main() {
 	}
 
 	// 启动时检查更新（后台进行，不阻塞用户操作）
-	updater.CheckUpdateOnStartup("cli", Version)
+	updater.CheckUpdateOnStartup("cli", Version, os.Args)
 
 	// 获取文件信息
 	fileInfo, err := os.Stat(*filePath)
@@ -1919,8 +1949,8 @@ func showConfigStatus() {
 	fmt.Println()
 
 	// 加载配置
-	config := loadCLIConfig()
-	configPath := getCLIConfigPath()
+	config := loadSharedConfig()
+	configPath := getSharedConfigPath()
 
 	// 获取已解析的命令行参数值
 	chunkSizeFlag := flag.Lookup("chunk-size")
