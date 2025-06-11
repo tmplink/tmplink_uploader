@@ -72,7 +72,7 @@ func main() {
 	}
 
 	// 启动时检查更新（后台进行，不阻塞用户操作）
-	updater.CheckUpdateOnStartup("gui", Version)
+	updater.CheckUpdateOnStartup("gui", Version, os.Args)
 
 	// 创建TUI模型
 	model := tui.NewModel(cliPath)

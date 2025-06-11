@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -15,6 +17,7 @@ const (
 	VERSION_URL           = "https://raw.githubusercontent.com/tmplink/tmplink_uploader/main/version.json"
 	DOWNLOAD_BASE_URL     = "https://github.com/tmplink/tmplink_uploader/releases/download"
 	GITHUB_REPO          = "tmplink/tmplink_uploader"
+	UPDATE_CHECK_INTERVAL = 1 * time.Hour
 )
 
 type VersionInfo struct {
@@ -27,6 +30,21 @@ type UpdateInfo struct {
 	LatestVersion  string
 	DownloadURL    string
 	CurrentVersion string
+}
+
+// SharedConfig represents the shared configuration structure for both GUI and CLI
+type SharedConfig struct {
+	Token              string    `json:"token"`
+	UploadServer       string    `json:"upload_server"`
+	SelectedServerName string    `json:"selected_server_name"`
+	ChunkSize          int       `json:"chunk_size"`
+	MaxConcurrent      int       `json:"max_concurrent"`
+	QuickUpload        bool      `json:"quick_upload"`
+	SkipUpload         bool      `json:"skip_upload"`
+	LastUpdateCheck    time.Time `json:"last_update_check"`
+	// CLI专用字段
+	Model int    `json:"model"`
+	MrID  string `json:"mr_id"`
 }
 
 // GetPlatformSuffix returns the platform suffix based on runtime.GOOS and runtime.GOARCH
@@ -277,9 +295,97 @@ func AutoUpdate(programType string, currentVersion string) error {
 	return nil
 }
 
-// CheckUpdateOnStartup performs a background update check on program startup
-func CheckUpdateOnStartup(programType string, currentVersion string) {
+// getSharedConfigPath returns the shared config file path
+func getSharedConfigPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ".tmplink_config.json"
+	}
+	return filepath.Join(homeDir, ".tmplink_config.json")
+}
+
+// shouldCheckUpdate checks if enough time has passed since last update check
+func shouldCheckUpdate(programType string) bool {
+	configPath := getSharedConfigPath()
+	
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		// Config file doesn't exist, should check
+		return true
+	}
+	
+	var config SharedConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		// Invalid format, should check
+		return true
+	}
+	
+	// Check if enough time has passed
+	if config.LastUpdateCheck.IsZero() {
+		return true
+	}
+	
+	return time.Since(config.LastUpdateCheck) > UPDATE_CHECK_INTERVAL
+}
+
+// saveUpdateCheckTime saves the current time as last update check time
+func saveUpdateCheckTime(programType string) error {
+	configPath := getSharedConfigPath()
+	now := time.Now()
+	
+	// Try to load existing config
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		// Config file doesn't exist, create a new one with default values
+		configDir := filepath.Dir(configPath)
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			return err
+		}
+		
+		config := SharedConfig{
+			ChunkSize:       3,
+			MaxConcurrent:   5,
+			QuickUpload:     true,
+			SkipUpload:      false,
+			Model:           0,
+			MrID:            "0",
+			LastUpdateCheck: now,
+		}
+		newData, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(configPath, newData, 0644)
+	}
+	
+	// Update existing config
+	var config SharedConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return err
+	}
+	config.LastUpdateCheck = now
+	newData, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, newData, 0644)
+}
+
+// CheckUpdateOnStartup performs a background update check on program startup and auto-updates if found
+func CheckUpdateOnStartup(programType string, currentVersion string, args []string) {
 	go func() {
+		// Wait a moment to ensure the program has started properly
+		time.Sleep(2 * time.Second)
+		
+		// Check if we should skip the update check
+		if !shouldCheckUpdate(programType) {
+			// Skip update check as it was done recently
+			return
+		}
+		
+		// Save the check time immediately to prevent multiple checks
+		saveUpdateCheckTime(programType)
+		
 		updateInfo, err := CheckForUpdateSilently(programType, currentVersion)
 		if err != nil {
 			// Silent fail, don't interrupt user experience
@@ -287,9 +393,62 @@ func CheckUpdateOnStartup(programType string, currentVersion string) {
 		}
 
 		if updateInfo.HasUpdate {
-			fmt.Printf("\n💡 提示: 发现新版本 %s，当前版本 %s\n",
+			fmt.Printf("\n🔄 发现新版本 %s，当前版本 %s\n",
 				updateInfo.LatestVersion, updateInfo.CurrentVersion)
-			fmt.Printf("   使用 --auto-update 参数自动更新\n\n")
+			fmt.Println("📥 开始自动更新...")
+			
+			// Get current executable path
+			exePath, err := os.Executable()
+			if err != nil {
+				fmt.Printf("❌ 获取程序路径失败: %v\n", err)
+				fmt.Printf("💡 请手动运行 --auto-update 参数更新\n\n")
+				return
+			}
+
+			// Download and install update
+			if err := DownloadUpdate(updateInfo, exePath); err != nil {
+				fmt.Printf("❌ 自动更新失败: %v\n", err)
+				fmt.Printf("💡 请手动运行 --auto-update 参数更新\n\n")
+				return
+			}
+
+			fmt.Printf("✅ 更新成功! 正在重启程序...\n")
+			
+			// Restart the program with the same arguments
+			if err := RestartProgram(exePath, args); err != nil {
+				fmt.Printf("❌ 重启程序失败: %v\n", err)
+				fmt.Printf("💡 请手动重启程序\n")
+			}
+			
+			// Exit current process
+			os.Exit(0)
 		}
 	}()
+}
+
+// RestartProgram restarts the current program with the same arguments
+func RestartProgram(exePath string, args []string) error {
+	// Prepare arguments (skip the first argument which is the program name)
+	var newArgs []string
+	if len(args) > 1 {
+		newArgs = args[1:]
+	}
+
+	if runtime.GOOS == "windows" {
+		// On Windows, use cmd.exe to start the new process
+		cmd := exec.Command("cmd", "/c", "start", "", exePath)
+		cmd.Args = append(cmd.Args, newArgs...)
+		cmd.Env = os.Environ()
+		return cmd.Start()
+	} else {
+		// On Unix-like systems, use syscall.Exec to replace the current process
+		// Add a small delay to ensure the file write is complete
+		time.Sleep(100 * time.Millisecond)
+		
+		// Prepare full arguments including program path
+		fullArgs := append([]string{exePath}, newArgs...)
+		
+		// Use syscall.Exec to replace current process
+		return syscall.Exec(exePath, fullArgs, os.Environ())
+	}
 }

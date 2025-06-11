@@ -56,13 +56,17 @@ type ServerOption struct {
 
 // 配置结构
 type Config struct {
-	Token              string `json:"token"`
-	UploadServer       string `json:"upload_server"`
-	SelectedServerName string `json:"selected_server_name"` // 选中的服务器名称
-	ChunkSize          int    `json:"chunk_size"`           // 存储MB数
-	MaxConcurrent      int    `json:"max_concurrent"`
-	QuickUpload        bool   `json:"quick_upload"`
-	SkipUpload         bool   `json:"skip_upload"`
+	Token              string    `json:"token"`
+	UploadServer       string    `json:"upload_server"`
+	SelectedServerName string    `json:"selected_server_name"` // 选中的服务器名称
+	ChunkSize          int       `json:"chunk_size"`           // 存储MB数
+	MaxConcurrent      int       `json:"max_concurrent"`
+	QuickUpload        bool      `json:"quick_upload"`
+	SkipUpload         bool      `json:"skip_upload"`
+	LastUpdateCheck    time.Time `json:"last_update_check"`    // 最后一次更新检查时间
+	// CLI专用字段
+	Model int    `json:"model"` // CLI文件过期模式
+	MrID  string `json:"mr_id"` // CLI目录ID
 }
 
 // getAvailableServers 从API获取可用的上传服务器列表
@@ -158,6 +162,8 @@ func defaultConfig() Config {
 		MaxConcurrent:      5,
 		QuickUpload:        true,
 		SkipUpload:         false,
+		Model:              0,   // CLI默认过期模式
+		MrID:               "0", // CLI默认根目录
 	}
 }
 
