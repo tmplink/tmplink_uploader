@@ -33,6 +33,12 @@ build-cli:
 	@echo "构建CLI程序..."
 	go build $(CLI_LDFLAGS) -o $(BINARY_DIR)$(CLI_BINARY) $(CLI_SOURCE)
 
+# 构建静态链接的 Linux CLI 程序（兼容旧版 GLIBC）
+build-cli-linux-static:
+	@echo "构建静态链接的 Linux CLI 程序..."
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BINARY_DIR)$(CLI_BINARY)-linux-amd64-static $(CLI_SOURCE)
+	@echo "完成！二进制文件: $(BINARY_DIR)$(CLI_BINARY)-linux-amd64-static"
+
 # 构建GUI程序  
 build-gui:
 	@echo "构建GUI程序..."
@@ -60,16 +66,16 @@ build-release: clean-build
 	GOOS=windows GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-windows-386.exe $(CLI_SOURCE)
 	
 	@echo "构建 Linux 64位..."
-	GOOS=linux GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-amd64 $(GUI_SOURCE)
-	GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-amd64 $(CLI_SOURCE)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-amd64 $(GUI_SOURCE)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-amd64 $(CLI_SOURCE)
 	
 	@echo "构建 Linux 32位..."
-	GOOS=linux GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-386 $(GUI_SOURCE)
-	GOOS=linux GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-386 $(CLI_SOURCE)
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-386 $(GUI_SOURCE)
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-386 $(CLI_SOURCE)
 	
 	@echo "构建 Linux ARM64..."
-	GOOS=linux GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-arm64 $(GUI_SOURCE)
-	GOOS=linux GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-arm64 $(CLI_SOURCE)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(GUI_LDFLAGS) -o $(BUILD_DIR)/$(GUI_BINARY)-linux-arm64 $(GUI_SOURCE)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(CLI_LDFLAGS) -o $(BUILD_DIR)/$(CLI_BINARY)-linux-arm64 $(CLI_SOURCE)
 	
 	@echo "所有平台构建完成！"
 
@@ -203,6 +209,7 @@ help:
 	@echo "构建命令:"
 	@echo "  build       - 构建当前平台版本"
 	@echo "  build-cli   - 只构建CLI程序"
+	@echo "  build-cli-linux-static - 构建静态链接的Linux CLI程序（兼容旧版GLIBC）"
 	@echo "  build-gui   - 只构建GUI程序"
 	@echo "  run         - 运行GUI程序（开发模式）"
 	@echo "  run-cli     - 运行CLI程序"
