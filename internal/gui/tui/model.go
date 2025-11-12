@@ -1534,56 +1534,34 @@ func (m Model) renderStatusBar() string {
 	// 第二行：存储信息
 	var line2 string
 	if m.userInfo.TotalSpace > 0 {
+		// 计算使用百分比
 		usedGB := float64(m.userInfo.UsedSpace) / (1024 * 1024 * 1024)
 		totalGB := float64(m.userInfo.TotalSpace) / (1024 * 1024 * 1024)
-
-		// 计算使用百分比
 		usagePercent := float64(m.userInfo.UsedSpace) / float64(m.userInfo.TotalSpace) * 100
 
 		// 构建存储信息行
-		storageText := fmt.Sprintf("存储: %.1fGB/%.1fGB (%.1f%%)", usedGB, totalGB, usagePercent)
-
-		// 添加上传状态（如果有）
-		if m.activeUploads > 0 {
-			uploadText := fmt.Sprintf(" | 上传中: %d个文件", m.activeUploads)
-			// 计算总体上传速度
-			totalSpeed := 0.0
-			for _, task := range m.uploadTasks {
-				if task.Status == "uploading" {
-					totalSpeed += task.UploadSpeed
-				}
-			}
-			if totalSpeed > 0 {
-				if totalSpeed >= 1024 {
-					uploadText += fmt.Sprintf(" (%.1fMB/s)", totalSpeed/1024)
-				} else {
-					uploadText += fmt.Sprintf(" (%.1fKB/s)", totalSpeed)
-				}
-			}
-			storageText += uploadText
-		}
-
-		line2 = storageText
+		line2 = fmt.Sprintf("存储: %.1fGB/%.1fGB (%.1f%%)", usedGB, totalGB, usagePercent)
 	} else {
-		if m.activeUploads > 0 {
-			line2 = fmt.Sprintf("上传中: %d个文件", m.activeUploads)
-			// 计算总体上传速度
-			totalSpeed := 0.0
-			for _, task := range m.uploadTasks {
-				if task.Status == "uploading" {
-					totalSpeed += task.UploadSpeed
-				}
+		line2 = "存储: 无私有空间"
+	}
+	// 添加上传状态（如果有）
+	if m.activeUploads > 0 {
+		uploadText := fmt.Sprintf(" | 上传中: %d个文件", m.activeUploads)
+		// 计算总体上传速度
+		totalSpeed := 0.0
+		for _, task := range m.uploadTasks {
+			if task.Status == "uploading" {
+				totalSpeed += task.UploadSpeed
 			}
-			if totalSpeed > 0 {
-				if totalSpeed >= 1024 {
-					line2 += fmt.Sprintf(" (%.1fMB/s)", totalSpeed/1024)
-				} else {
-					line2 += fmt.Sprintf(" (%.1fKB/s)", totalSpeed)
-				}
-			}
-		} else {
-			line2 = "存储信息: 加载中..."
 		}
+		if totalSpeed > 0 {
+			if totalSpeed >= 1024 {
+				uploadText += fmt.Sprintf(" (%.1fMB/s)", totalSpeed/1024)
+			} else {
+				uploadText += fmt.Sprintf(" (%.1fKB/s)", totalSpeed)
+			}
+		}
+		line2 += uploadText
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line2))
 
