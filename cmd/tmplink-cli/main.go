@@ -437,6 +437,13 @@ func main() {
 	// 检测是否为CLI模式（用户未提供task-id）
 	cliMode := *taskID == ""
 
+	// 检测用户是否显式提供了 -status-file 参数
+	statusFileFlag := flag.Lookup("status-file")
+	statusFileExplicit := isFlagSet(statusFileFlag)
+
+	// 确定是否应该保存状态文件：GUI模式 或 用户显式提供了 -status-file
+	shouldSaveStatus := !cliMode || statusFileExplicit
+
 	// 自动生成task-id (如果未提供)
 	if cliMode {
 		*taskID = fmt.Sprintf("upload_%d", time.Now().Unix())
@@ -491,8 +498,8 @@ func main() {
 		UpdatedAt:  time.Now(),
 	}
 
-	// 只有在GUI模式下才保存初始状态到文件
-	if !cliMode {
+	// 只有当需要保存状态时才保存初始状态到文件
+	if shouldSaveStatus {
 		if err := saveTaskStatus(*statusFile, task); err != nil {
 			fmt.Fprintf(os.Stderr, "错误: 保存任务状态失败: %v\n", err)
 			os.Exit(1)
@@ -523,7 +530,7 @@ func main() {
 	speedCalc := NewSpeedCalculator(fileInfo.Size())
 
 	// 设置进度回调
-	progressCallback := createProgressCallback(cliMode, fileInfo.Size(), speedCalc, task, *statusFile)
+	progressCallback := createProgressCallback(cliMode, shouldSaveStatus, fileInfo.Size(), speedCalc, task, *statusFile)
 
 	// 验证Token有效性
 	debugPrint(config, "验证Token有效性...")
@@ -538,11 +545,13 @@ func main() {
 			fmt.Printf("❗ 错误信息: %v\n", err)
 			fmt.Println("💡 请使用 -set-token 命令重新设置有效的API Token")
 		} else {
-			// GUI模式：保存状态到文件
+			fmt.Fprintf(os.Stderr, "Token验证失败: %v\n", err)
+		}
+		// 保存失败状态到文件
+		if shouldSaveStatus {
 			if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
 				fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
 			}
-			fmt.Fprintf(os.Stderr, "Token验证失败: %v\n", err)
 		}
 		os.Exit(1)
 	}
@@ -551,8 +560,8 @@ func main() {
 	// 开始上传
 	task.Status = "uploading"
 	task.UpdatedAt = time.Now()
-	// 只有在GUI模式下才保存状态到文件
-	if !cliMode {
+	// 保存上传中状态到文件
+	if shouldSaveStatus {
 		saveTaskStatus(*statusFile, task)
 	}
 
@@ -572,12 +581,14 @@ func main() {
 			fmt.Printf("📁 文件名: %s\n", task.FileName)
 			fmt.Printf("❗ 错误信息: %v\n", err)
 		} else {
-			// GUI模式：保存状态到文件
+			// GUI模式下仍然输出到stderr，供调试使用
+			fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
+		}
+		// 保存失败状态到文件
+		if shouldSaveStatus {
 			if saveErr := saveTaskStatus(*statusFile, task); saveErr != nil {
 				fmt.Fprintf(os.Stderr, "错误: 保存失败状态失败: %v\n", saveErr)
 			}
-			// GUI模式下仍然输出到stderr，供调试使用
-			fmt.Fprintf(os.Stderr, "上传失败: %v\n", err)
 		}
 
 		os.Exit(1)
@@ -601,12 +612,11 @@ func main() {
 		duration := time.Since(speedCalc.startTime)
 		fmt.Printf("⏱️  总耗时: %v\n", duration.Round(time.Second))
 		fmt.Printf("🔗 下载链接: %s\n", result.DownloadURL)
-	} else {
-		// GUI模式：保存状态到文件
-		if !cliMode {
-			if err := saveTaskStatus(*statusFile, task); err != nil {
-				fmt.Fprintf(os.Stderr, "警告: 保存完成状态失败: %v\n", err)
-			}
+	}
+	// 保存完成状态到文件
+	if shouldSaveStatus {
+		if err := saveTaskStatus(*statusFile, task); err != nil {
+			fmt.Fprintf(os.Stderr, "警告: 保存完成状态失败: %v\n", err)
 		}
 	}
 }
@@ -1888,7 +1898,7 @@ func clearProgressBar() {
 }
 
 // createProgressCallback 创建进度回调函数
-func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalculator, task *TaskStatus, statusFile string) func(int64, int64) {
+func createProgressCallback(cliMode bool, shouldSaveStatus bool, fileSize int64, speedCalc *SpeedCalculator, task *TaskStatus, statusFile string) func(int64, int64) {
 	var bar *progressbar.ProgressBar
 
 	// 如果是CLI模式，只显示开始信息，不立即创建进度条
@@ -1934,8 +1944,8 @@ func createProgressCallback(cliMode bool, fileSize int64, speedCalc *SpeedCalcul
 			bar.Set64(uploaded)
 		}
 
-		// GUI模式：保存状态到文件
-		if !cliMode {
+		// 保存进度状态到文件
+		if shouldSaveStatus {
 			if err := saveTaskStatus(statusFile, task); err != nil {
 				fmt.Fprintf(os.Stderr, "警告: 保存进度失败: %v\n", err)
 			}
