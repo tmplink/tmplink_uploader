@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"tmplink_uploader/internal/i18n"
+
 	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
@@ -30,6 +32,7 @@ type State int
 
 const (
 	StateInit                  State = iota // 初始化状态
+	StateLanguageSelect                     // 语言选择（首次运行）
 	StateTokenInput                         // Token输入
 	StateTokenValidationFailed              // Token验证失败等待状态
 	StateMain                               // 主界面（文件浏览器）
@@ -64,6 +67,7 @@ type Config struct {
 	QuickUpload        bool      `json:"quick_upload"`
 	SkipUpload         bool      `json:"skip_upload"`
 	LastUpdateCheck    time.Time `json:"last_update_check"`    // 最后一次更新检查时间
+	Language           string    `json:"language"`             // 界面语言
 	// CLI专用字段
 	Model int    `json:"model"` // CLI文件过期模式
 	MrID  string `json:"mr_id"` // CLI目录ID
@@ -162,7 +166,8 @@ func defaultConfig() Config {
 		MaxConcurrent:      5,
 		QuickUpload:        true,
 		SkipUpload:         false,
-		Model:              0,   // CLI默认过期模式
+		Language:           "", // 空表示尚未选择，首次运行时展示语言选择界面
+		Model:              0,  // CLI默认过期模式
 		MrID:               "0", // CLI默认根目录
 	}
 }
@@ -201,6 +206,7 @@ type Model struct {
 	userInfo     UserInfo
 	selectedFile string
 	uploadTasks  []TaskStatus
+	langIndex    int // 语言选择界面的当前选中索引
 
 	// UI组件
 	tokenInput  textinput.Model
@@ -250,16 +256,21 @@ func NewModel(cliPath string) Model {
 
 	// 初始化token输入框
 	tokenInput := textinput.New()
-	tokenInput.Placeholder = "请输入钛盘 API Token"
+	tokenInput.Placeholder = i18n.T("auth.placeholder")
 	tokenInput.Width = 50
 
-	// 初始化状态 - 如果没有有效Token，直接进入Token输入界面
-	initialState := StateTokenInput
-	tokenInput.Focus()
-
-	// 只有当Token存在且非空时，才尝试验证并初始化
-	if strings.TrimSpace(config.Token) != "" {
+	// 初始化状态
+	// 如果尚未选择语言，先进入语言选择界面
+	// 否则，如果没有有效Token，进入Token输入界面
+	var initialState State
+	if config.Language == "" {
+		initialState = StateLanguageSelect
+	} else if strings.TrimSpace(config.Token) != "" {
 		initialState = StateInit
+		tokenInput.Focus()
+	} else {
+		initialState = StateTokenInput
+		tokenInput.Focus()
 	}
 
 	// 初始化文件选择器
@@ -284,25 +295,25 @@ func NewModel(cliPath string) Model {
 
 	// 初始化导航菜单
 	items := []list.Item{
-		menuItem{title: "文件浏览器", desc: "选择要上传的文件"},
-		menuItem{title: "上传设置", desc: "配置上传参数"},
-		menuItem{title: "上传管理器", desc: "查看和管理上传任务"},
+		menuItem{title: i18n.T("menu.file_browser"), desc: i18n.T("menu.file_browser_desc")},
+		menuItem{title: i18n.T("menu.settings"), desc: i18n.T("menu.settings_desc")},
+		menuItem{title: i18n.T("menu.upload_manager"), desc: i18n.T("menu.upload_manager_desc")},
 	}
 
 	nav := list.New(items, list.NewDefaultDelegate(), 0, 0)
-	nav.Title = "功能菜单"
+	nav.Title = i18n.T("menu.title")
 	nav.SetShowStatusBar(false)
 	nav.SetFilteringEnabled(false)
 	nav.SetShowHelp(false)
 
 	// 初始化上传任务表格
 	columns := []table.Column{
-		{Title: "文件名", Width: 25},
-		{Title: "大小", Width: 10},
-		{Title: "进度", Width: 10},
-		{Title: "速度", Width: 10},
-		{Title: "服务器", Width: 12},
-		{Title: "状态", Width: 10},
+		{Title: i18n.T("upload_list.col_filename"), Width: 25},
+		{Title: i18n.T("upload_list.col_size"), Width: 10},
+		{Title: i18n.T("upload_list.col_progress"), Width: 10},
+		{Title: i18n.T("upload_list.col_speed"), Width: 10},
+		{Title: i18n.T("upload_list.col_server"), Width: 12},
+		{Title: i18n.T("upload_list.col_status"), Width: 10},
 	}
 
 	uploadTable := table.New(
@@ -343,13 +354,13 @@ func NewModel(cliPath string) Model {
 	settingsInputs := make(map[string]textinput.Model)
 
 	chunkSizeInput := textinput.New()
-	chunkSizeInput.Placeholder = "分块大小(MB)"
+	chunkSizeInput.Placeholder = i18n.T("settings.chunk_placeholder")
 	chunkSizeInput.Width = 20
 	chunkSizeInput.SetValue(fmt.Sprintf("%d", config.ChunkSize))
 	settingsInputs["chunk_size"] = chunkSizeInput
 
 	concurrencyInput := textinput.New()
-	concurrencyInput.Placeholder = "并发数"
+	concurrencyInput.Placeholder = i18n.T("settings.concurrency_placeholder")
 	concurrencyInput.Width = 20
 	concurrencyInput.SetValue(fmt.Sprintf("%d", config.MaxConcurrent))
 	settingsInputs["concurrency"] = concurrencyInput
@@ -392,6 +403,7 @@ func NewModel(cliPath string) Model {
 		availableServers: availableServers,
 		uploadTasks:      uploadTasks,
 		statusFiles:      statusFiles,
+		langIndex:        0,
 		isLoading:        strings.TrimSpace(config.Token) != "" && initialState == StateInit,
 	}
 }
@@ -603,6 +615,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.state {
+	case StateLanguageSelect:
+		return m.handleLanguageSelect(msg)
 	case StateTokenInput:
 		return m.handleTokenInput(msg)
 	case StateTokenValidationFailed:
@@ -617,6 +631,64 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleError(msg)
 	}
 
+	return m, nil
+}
+
+// handleLanguageSelect 处理语言选择界面输入
+func (m Model) handleLanguageSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	langs := i18n.SupportedLanguages
+	switch msg.String() {
+	case "up", "k":
+		if m.langIndex > 0 {
+			m.langIndex--
+		}
+	case "down", "j":
+		if m.langIndex < len(langs)-1 {
+			m.langIndex++
+		}
+	case "enter":
+		// 保存选择的语言
+		selectedLang := langs[m.langIndex]
+		i18n.SetLanguage(selectedLang)
+		m.config.Language = selectedLang
+
+		// 重建菜单和输入框以反映新语言
+		items := []list.Item{
+			menuItem{title: i18n.T("menu.file_browser"), desc: i18n.T("menu.file_browser_desc")},
+			menuItem{title: i18n.T("menu.settings"), desc: i18n.T("menu.settings_desc")},
+			menuItem{title: i18n.T("menu.upload_manager"), desc: i18n.T("menu.upload_manager_desc")},
+		}
+		m.navigation.SetItems(items)
+		m.navigation.Title = i18n.T("menu.title")
+		m.tokenInput.Placeholder = i18n.T("auth.placeholder")
+
+		if chunkInput, ok := m.settingsInputs["chunk_size"]; ok {
+			chunkInput.Placeholder = i18n.T("settings.chunk_placeholder")
+			m.settingsInputs["chunk_size"] = chunkInput
+		}
+		if concInput, ok := m.settingsInputs["concurrency"]; ok {
+			concInput.Placeholder = i18n.T("settings.concurrency_placeholder")
+			m.settingsInputs["concurrency"] = concInput
+		}
+
+		// 更新表格列标题
+		columns := []table.Column{
+			{Title: i18n.T("upload_list.col_filename"), Width: 25},
+			{Title: i18n.T("upload_list.col_size"), Width: 10},
+			{Title: i18n.T("upload_list.col_progress"), Width: 10},
+			{Title: i18n.T("upload_list.col_speed"), Width: 10},
+			{Title: i18n.T("upload_list.col_server"), Width: 12},
+			{Title: i18n.T("upload_list.col_status"), Width: 10},
+		}
+		m.uploadTable.SetColumns(columns)
+
+		// 保存配置
+		saveConfig(m.config)
+
+		// 进入Token输入界面
+		m.state = StateTokenInput
+		m.tokenInput.Focus()
+	}
 	return m, nil
 }
 
@@ -690,13 +762,12 @@ func (m Model) handleMainView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleSettings 处理设置界面输入
 func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// 赞助者设置项
-	sponsorSettings := []string{"chunk_size", "concurrency", "server", "quick_upload"}
-
-	// 根据用户类型确定可用设置
+	// 根据用户类型确定可用设置（需与 renderSettings 保持一致）
 	var settingsKeys []string
 	if m.userInfo.IsSponsored {
-		settingsKeys = append(settingsKeys, sponsorSettings...)
+		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload", "language"}
+	} else {
+		settingsKeys = []string{"language"}
 	}
 
 	switch msg.String() {
@@ -709,16 +780,12 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "up":
 		if m.settingsIndex > 0 {
-			// 失去当前输入框焦点（仅对有输入框的设置项）
 			currentKey := settingsKeys[m.settingsIndex]
 			if input, exists := m.settingsInputs[currentKey]; exists {
 				input.Blur()
 				m.settingsInputs[currentKey] = input
 			}
-
 			m.settingsIndex--
-
-			// 设置新输入框焦点（仅对有输入框的设置项）
 			newKey := settingsKeys[m.settingsIndex]
 			if newInput, exists := m.settingsInputs[newKey]; exists {
 				newInput.Focus()
@@ -728,16 +795,12 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "down":
 		if m.settingsIndex < len(settingsKeys)-1 {
-			// 失去当前输入框焦点（仅对有输入框的设置项）
 			currentKey := settingsKeys[m.settingsIndex]
 			if input, exists := m.settingsInputs[currentKey]; exists {
 				input.Blur()
 				m.settingsInputs[currentKey] = input
 			}
-
 			m.settingsIndex++
-
-			// 设置新输入框焦点（仅对有输入框的设置项）
 			newKey := settingsKeys[m.settingsIndex]
 			if newInput, exists := m.settingsInputs[newKey]; exists {
 				newInput.Focus()
@@ -746,39 +809,60 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "left", "right":
-		// 处理特殊设置项的切换（仅赞助者）
-		if m.userInfo.IsSponsored && m.settingsIndex < len(settingsKeys) {
+		if m.settingsIndex < len(settingsKeys) {
 			currentKey := settingsKeys[m.settingsIndex]
-			if currentKey == "server" {
-				// 切换服务器
-				if msg.String() == "left" {
-					if m.serverIndex > 0 {
-						m.serverIndex--
+			switch currentKey {
+			case "server":
+				if m.userInfo.IsSponsored {
+					if msg.String() == "left" {
+						if m.serverIndex > 0 {
+							m.serverIndex--
+						} else {
+							m.serverIndex = len(m.availableServers) - 1
+						}
 					} else {
-						m.serverIndex = len(m.availableServers) - 1
-					}
-				} else {
-					if m.serverIndex < len(m.availableServers)-1 {
-						m.serverIndex++
-					} else {
-						m.serverIndex = 0
+						if m.serverIndex < len(m.availableServers)-1 {
+							m.serverIndex++
+						} else {
+							m.serverIndex = 0
+						}
 					}
 				}
-				return m, nil
-			} else if currentKey == "quick_upload" {
-				// 切换快速上传
-				m.config.QuickUpload = !m.config.QuickUpload
-				return m, nil
+			case "quick_upload":
+				if m.userInfo.IsSponsored {
+					m.config.QuickUpload = !m.config.QuickUpload
+				}
+			case "language":
+				langs := i18n.SupportedLanguages
+				curIdx := 0
+				for i, l := range langs {
+					if l == i18n.GetLanguage() {
+						curIdx = i
+						break
+					}
+				}
+				if msg.String() == "left" {
+					if curIdx > 0 {
+						curIdx--
+					} else {
+						curIdx = len(langs) - 1
+					}
+				} else {
+					if curIdx < len(langs)-1 {
+						curIdx++
+					} else {
+						curIdx = 0
+					}
+				}
+				m = m.applyLanguage(langs[curIdx])
 			}
 		}
 		return m, nil
 	case " ":
-		// 处理空格键切换快速上传（仅赞助者）
-		if m.userInfo.IsSponsored && m.settingsIndex < len(settingsKeys) {
+		if m.settingsIndex < len(settingsKeys) {
 			currentKey := settingsKeys[m.settingsIndex]
-			if currentKey == "quick_upload" {
+			if currentKey == "quick_upload" && m.userInfo.IsSponsored {
 				m.config.QuickUpload = !m.config.QuickUpload
-				return m, nil
 			}
 		}
 		return m, nil
@@ -786,7 +870,7 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.saveSettings()
 	}
 
-	// 更新当前聚焦的输入框（仅对有输入框的设置项）
+	// 更新当前聚焦的输入框
 	if m.settingsIndex < len(settingsKeys) {
 		currentKey := settingsKeys[m.settingsIndex]
 		if input, exists := m.settingsInputs[currentKey]; exists {
@@ -797,6 +881,42 @@ func (m Model) handleSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// applyLanguage 切换界面语言并重建需要语言的 UI 组件
+func (m Model) applyLanguage(lang string) Model {
+	i18n.SetLanguage(lang)
+	m.config.Language = lang
+
+	items := []list.Item{
+		menuItem{title: i18n.T("menu.file_browser"), desc: i18n.T("menu.file_browser_desc")},
+		menuItem{title: i18n.T("menu.settings"), desc: i18n.T("menu.settings_desc")},
+		menuItem{title: i18n.T("menu.upload_manager"), desc: i18n.T("menu.upload_manager_desc")},
+	}
+	m.navigation.SetItems(items)
+	m.navigation.Title = i18n.T("menu.title")
+	m.tokenInput.Placeholder = i18n.T("auth.placeholder")
+
+	if chunkInput, ok := m.settingsInputs["chunk_size"]; ok {
+		chunkInput.Placeholder = i18n.T("settings.chunk_placeholder")
+		m.settingsInputs["chunk_size"] = chunkInput
+	}
+	if concInput, ok := m.settingsInputs["concurrency"]; ok {
+		concInput.Placeholder = i18n.T("settings.concurrency_placeholder")
+		m.settingsInputs["concurrency"] = concInput
+	}
+
+	columns := []table.Column{
+		{Title: i18n.T("upload_list.col_filename"), Width: 25},
+		{Title: i18n.T("upload_list.col_size"), Width: 10},
+		{Title: i18n.T("upload_list.col_progress"), Width: 10},
+		{Title: i18n.T("upload_list.col_speed"), Width: 10},
+		{Title: i18n.T("upload_list.col_server"), Width: 12},
+		{Title: i18n.T("upload_list.col_status"), Width: 10},
+	}
+	m.uploadTable.SetColumns(columns)
+
+	return m
 }
 
 // handleUploadList 处理上传列表输入
@@ -886,11 +1006,11 @@ func (m Model) isFileUploadAllowed(filePath string) (bool, string) {
 	// 其他状态都不允许重复上传
 	switch status {
 	case "starting", "pending", "uploading":
-		return false, "文件正在上传中"
+		return false, i18n.T("upload.in_progress")
 	case "completed":
-		return false, "文件已上传完成"
+		return false, i18n.T("upload.completed")
 	default:
-		return false, "文件已在上传列表中"
+		return false, i18n.T("upload.in_list")
 	}
 }
 
@@ -1288,15 +1408,15 @@ func (m *Model) updateUploadTable() {
 		statusStr := task.Status
 		switch task.Status {
 		case "starting":
-			statusStr = "启动中"
+			statusStr = i18n.T("task.starting")
 		case "pending":
-			statusStr = "等待中"
+			statusStr = i18n.T("task.pending")
 		case "uploading":
-			statusStr = "上传中"
+			statusStr = i18n.T("task.uploading")
 		case "completed":
-			statusStr = "已完成"
+			statusStr = i18n.T("task.completed")
 		case "failed":
-			statusStr = "失败"
+			statusStr = i18n.T("task.failed")
 		}
 
 		// 速度显示（上传中和已完成都显示最终速度）
@@ -1312,7 +1432,7 @@ func (m *Model) updateUploadTable() {
 		// 服务器名称显示
 		serverStr := task.ServerName
 		if serverStr == "" {
-			serverStr = "未知"
+			serverStr = i18n.T("task.unknown_server")
 		}
 
 		row := table.Row{
@@ -1332,7 +1452,8 @@ func (m *Model) updateUploadTable() {
 // View 渲染视图
 func (m Model) View() string {
 	// 在没有有效Token或用户信息的状态下，不显示状态栏
-	shouldHideStatusBar := m.state == StateTokenInput ||
+	shouldHideStatusBar := m.state == StateLanguageSelect ||
+		m.state == StateTokenInput ||
 		m.state == StateTokenValidationFailed ||
 		m.state == StateInit ||
 		m.userInfo.Username == ""
@@ -1410,9 +1531,9 @@ func (m Model) renderTokenInput() string {
 	var content strings.Builder
 
 	// 标题区域
-	content.WriteString(titleStyle.Render("钛盘文件上传工具"))
+	content.WriteString(titleStyle.Render(i18n.T("app.title")))
 	content.WriteString("\n")
-	content.WriteString(subtitleStyle.Render("安全认证"))
+	content.WriteString(subtitleStyle.Render(i18n.T("auth.subtitle")))
 	content.WriteString("\n\n")
 
 	// 显示错误信息（如果有）
@@ -1426,7 +1547,7 @@ func (m Model) renderTokenInput() string {
 			Width(windowWidth - 22).
 			MarginBottom(2)
 
-		content.WriteString(errorBoxStyle.Render(fmt.Sprintf("❌ 验证失败\n\n%s", m.err.Error())))
+		content.WriteString(errorBoxStyle.Render(i18n.Tf("auth.error_box", m.err.Error())))
 		content.WriteString("\n\n")
 	}
 
@@ -1438,17 +1559,10 @@ func (m Model) renderTokenInput() string {
 			Align(lipgloss.Center).
 			Width(windowWidth - 18)
 
-		content.WriteString(loadingStyle.Render(fmt.Sprintf("%s 正在验证Token，请稍候...", m.spinner.View())))
+		content.WriteString(loadingStyle.Render(i18n.Tf("auth.validating", m.spinner.View())))
 		content.WriteString("\n\n")
 	} else {
-		// 说明文字
-		instructions := `请输入您的钛盘 Token 来开始使用：
-
-1. 访问 https://tmp.link/ 并登录您的账户
-2. 点击“上传文件”按钮，然后点击“重新设定”按钮，滑动到窗口底部，点击 “使用 CLI 上传”
-3. 点击 Token 以复制到剪贴板`
-
-		content.WriteString(instructionStyle.Render(instructions))
+		content.WriteString(instructionStyle.Render(i18n.T("auth.instructions")))
 		content.WriteString("\n")
 
 		// 输入框标签
@@ -1457,7 +1571,7 @@ func (m Model) renderTokenInput() string {
 			Bold(true).
 			MarginBottom(1)
 
-		content.WriteString(labelStyle.Render("Token:"))
+		content.WriteString(labelStyle.Render(i18n.T("auth.token_label")))
 		content.WriteString("\n")
 	}
 
@@ -1471,10 +1585,9 @@ func (m Model) renderTokenInput() string {
 
 	// 帮助信息
 	if m.isLoading {
-		content.WriteString(helpStyle.Render("请耐心等待验证完成..."))
+		content.WriteString(helpStyle.Render(i18n.T("auth.wait")))
 	} else {
-		helpText := "💡 Enter: 验证并保存  •  Ctrl+C: 退出程序"
-		content.WriteString(helpStyle.Render(helpText))
+		content.WriteString(helpStyle.Render(i18n.T("auth.help")))
 	}
 
 	// 将内容放入窗口边框
@@ -1505,7 +1618,7 @@ func (m Model) renderTokenInput() string {
 // renderStatusBar 渲染顶部状态栏（三行布局）
 func (m Model) renderStatusBar() string {
 	if m.isLoading {
-		return statusBarStyle.Render(fmt.Sprintf("%s 正在加载用户信息...", m.spinner.View()))
+		return statusBarStyle.Render(i18n.Tf("loading.token", m.spinner.View()))
 	}
 
 	// 计算可用宽度
@@ -1519,35 +1632,30 @@ func (m Model) renderStatusBar() string {
 	// 第一行：用户信息和认证状态
 	var line1 string
 	if m.userInfo.Username != "" {
-		userText := fmt.Sprintf("用户: %s", m.userInfo.Username)
+		userText := i18n.Tf("status.user", m.userInfo.Username)
 		if m.userInfo.IsSponsored {
-			userText += " ✨ (赞助者)"
+			userText += i18n.T("status.sponsor")
 		} else {
-			userText += " (普通用户)"
+			userText += i18n.T("status.regular")
 		}
 		line1 = userText
 	} else {
-		line1 = "用户: 未登录"
+		line1 = i18n.T("status.not_logged_in")
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line1))
 
 	// 第二行：存储信息
 	var line2 string
 	if m.userInfo.TotalSpace > 0 {
-		// 计算使用百分比
 		usedGB := float64(m.userInfo.UsedSpace) / (1024 * 1024 * 1024)
 		totalGB := float64(m.userInfo.TotalSpace) / (1024 * 1024 * 1024)
 		usagePercent := float64(m.userInfo.UsedSpace) / float64(m.userInfo.TotalSpace) * 100
-
-		// 构建存储信息行
-		line2 = fmt.Sprintf("存储: %.1fGB/%.1fGB (%.1f%%)", usedGB, totalGB, usagePercent)
+		line2 = i18n.Tf("status.storage", usedGB, totalGB, usagePercent)
 	} else {
-		line2 = "存储: 无私有空间"
+		line2 = i18n.T("status.no_storage")
 	}
-	// 添加上传状态（如果有）
 	if m.activeUploads > 0 {
-		uploadText := fmt.Sprintf(" | 上传中: %d个文件", m.activeUploads)
-		// 计算总体上传速度
+		uploadText := i18n.Tf("status.uploading", m.activeUploads)
 		totalSpeed := 0.0
 		for _, task := range m.uploadTasks {
 			if task.Status == "uploading" {
@@ -1556,9 +1664,9 @@ func (m Model) renderStatusBar() string {
 		}
 		if totalSpeed > 0 {
 			if totalSpeed >= 1024 {
-				uploadText += fmt.Sprintf(" (%.1fMB/s)", totalSpeed/1024)
+				uploadText += i18n.Tf("status.speed_mb", totalSpeed/1024)
 			} else {
-				uploadText += fmt.Sprintf(" (%.1fKB/s)", totalSpeed)
+				uploadText += i18n.Tf("status.speed_kb", totalSpeed)
 			}
 		}
 		line2 += uploadText
@@ -1569,47 +1677,34 @@ func (m Model) renderStatusBar() string {
 	var line3 string
 	switch m.state {
 	case StateMain:
-		// 根据当前选中项目和是否能返回上级目录来显示按键提示
 		parentDir := filepath.Dir(m.currentDir)
-		
-		// 确定Enter键的动作文字
-		enterAction := "进入"
+		enterAction := i18n.T("nav.enter")
 		if len(m.files) > 0 && m.selectedIndex < len(m.files) {
 			selectedFile := m.files[m.selectedIndex]
 			if !selectedFile.IsDir {
-				enterAction = "上传"
+				enterAction = i18n.T("nav.upload")
 			}
 		}
-		
-		if parentDir != m.currentDir { // 可以返回上级目录
-			line3 = fmt.Sprintf("↑↓:选择 ←→:上级 Enter:%s t:隐藏文件 Tab:设置 Q:退出", enterAction)
-		} else { // 在根目录，无法返回上级
-			line3 = fmt.Sprintf("↑↓:选择 Enter:%s t:隐藏文件 Tab:设置 Q:退出", enterAction)
+		if parentDir != m.currentDir {
+			line3 = i18n.Tf("nav.keys_with_parent", enterAction)
+		} else {
+			line3 = i18n.Tf("nav.keys_no_parent", enterAction)
 		}
 	case StateSettings:
-		line3 = "↑↓:选择 Enter:保存 Tab:上传管理 Esc:返回 Q:退出"
+		line3 = i18n.T("settings.keys")
 	case StateUploadList:
-		line3 = "↑↓:选择 d:删除 t:清除完成 y:清除全部 Tab:文件浏览 Esc:返回 Q:退出"
+		line3 = i18n.T("upload_list.keys")
 	case StateError:
-		line3 = "操作: Enter:重试 Esc:返回 Q:退出"
+		line3 = i18n.T("error.keys")
 	default:
-		line3 = "操作: Q:退出"
+		line3 = i18n.T("default.keys")
 	}
 
-	// 确保操作提示不超过宽度，优先保留Q:退出
-	if len(line3) > statusWidth {
-		// 如果包含Q:退出，尝试保留它
-		if strings.Contains(line3, "Q:退出") {
-			// 计算Q:退出需要的空间
-			quitPart := " Q:退出"
-			if statusWidth > len(quitPart)+6 { // 6 = "..." + 一些空间
-				maxLen := statusWidth - len(quitPart) - 3
-				line3 = line3[:maxLen] + "..." + quitPart
-			} else {
-				line3 = line3[:statusWidth-3] + "..."
-			}
-		} else {
-			line3 = line3[:statusWidth-3] + "..."
+	// 确保操作提示不超过宽度（按 Unicode 字符截断）
+	if len([]rune(line3)) > statusWidth {
+		runes := []rune(line3)
+		if statusWidth > 3 {
+			line3 = string(runes[:statusWidth-3]) + "..."
 		}
 	}
 	lines = append(lines, statusBarStyle.Width(statusWidth).Render(line3))
@@ -1712,6 +1807,8 @@ func (m Model) renderContent() string {
 	switch m.state {
 	case StateInit:
 		return m.renderLoading()
+	case StateLanguageSelect:
+		return m.renderLanguageSelect()
 	case StateTokenInput:
 		return m.renderTokenInput()
 	case StateTokenValidationFailed:
@@ -1725,13 +1822,75 @@ func (m Model) renderContent() string {
 	case StateError:
 		return m.renderError()
 	default:
-		return "未知状态"
+		return i18n.T("unknown_state")
 	}
 }
 
 // renderLoading 渲染加载界面
 func (m Model) renderLoading() string {
-	return fmt.Sprintf("\n%s 正在验证Token...", m.spinner.View())
+	return i18n.Tf("loading.token", m.spinner.View())
+}
+
+// renderLanguageSelect 渲染语言选择界面（首次运行）
+func (m Model) renderLanguageSelect() string {
+	windowWidth := 60
+	if m.width > 0 && m.width < windowWidth+10 {
+		windowWidth = m.width - 10
+	}
+
+	windowStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(2, 4).
+		Width(windowWidth - 10)
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("205")).
+		Bold(true).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+
+	var content strings.Builder
+
+	// 显示三种语言的标题，方便用户识别
+	content.WriteString(titleStyle.Render("选择语言 / Select Language / 言語を選択"))
+	content.WriteString("\n\n")
+
+	for i, lang := range i18n.SupportedLanguages {
+		name := i18n.LanguageNames[lang]
+		if i == m.langIndex {
+			line := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("205")).
+				Bold(true).
+				Render("> " + name)
+			content.WriteString(line)
+		} else {
+			content.WriteString("  " + name)
+		}
+		content.WriteString("\n")
+	}
+
+	content.WriteString("\n")
+
+	// 三语提示
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Align(lipgloss.Center).
+		Width(windowWidth - 18)
+	content.WriteString(hintStyle.Render("↑↓:选择/Select/選択  Enter:确认/Confirm/確認"))
+
+	window := windowStyle.Render(content.String())
+
+	availableHeight := m.height
+	availableWidth := m.width
+	if availableHeight <= 0 {
+		availableHeight = 30
+	}
+	if availableWidth <= 0 {
+		availableWidth = 80
+	}
+
+	return lipgloss.Place(availableWidth, availableHeight, lipgloss.Center, lipgloss.Center, window)
 }
 
 // renderTokenValidationFailed 渲染Token验证失败界面
@@ -1775,9 +1934,9 @@ func (m Model) renderTokenValidationFailed() string {
 	var content strings.Builder
 
 	// 标题区域
-	content.WriteString(titleStyle.Render("❌ 验证失败"))
+	content.WriteString(titleStyle.Render(i18n.T("auth.failed_title")))
 	content.WriteString("\n")
-	content.WriteString(subtitleStyle.Render("Token 认证出现问题"))
+	content.WriteString(subtitleStyle.Render(i18n.T("auth.failed_subtitle")))
 	content.WriteString("\n\n")
 
 	// 显示错误信息
@@ -1791,7 +1950,7 @@ func (m Model) renderTokenValidationFailed() string {
 			Width(windowWidth - 22).
 			MarginBottom(2)
 
-		content.WriteString(errorBoxStyle.Render(fmt.Sprintf("错误详情：\n\n%s", m.err.Error())))
+		content.WriteString(errorBoxStyle.Render(i18n.Tf("auth.error_details", m.err.Error())))
 		content.WriteString("\n\n")
 	}
 
@@ -1802,11 +1961,11 @@ func (m Model) renderTokenValidationFailed() string {
 		Align(lipgloss.Center).
 		Width(windowWidth - 18)
 
-	content.WriteString(loadingStyle.Render(fmt.Sprintf("%s 3秒后自动返回输入界面...", m.spinner.View())))
+	content.WriteString(loadingStyle.Render(i18n.Tf("auth.auto_return", m.spinner.View())))
 	content.WriteString("\n\n")
 
 	// 帮助信息
-	content.WriteString(helpStyle.Render("💡 按任意键立即返回  •  Ctrl+C: 退出程序"))
+	content.WriteString(helpStyle.Render(i18n.T("auth.any_key_return")))
 
 	// 将内容放入窗口边框
 	window := windowStyle.Render(content.String())
@@ -1838,18 +1997,18 @@ func (m Model) renderMainView() string {
 	var s strings.Builder
 
 	// 标题和当前路径
-	title := "文件浏览器"
+	title := i18n.T("filebrowser.title")
 	if m.showHidden {
-		title += " (显示隐藏文件)"
+		title += i18n.T("filebrowser.show_hidden")
 	}
 	s.WriteString(titleStyle.Render(title))
 	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("当前目录: %s\n", m.currentDir))
-	s.WriteString(helpStyle.Render("📁目录 📄文件 🟡等待 🔵上传中 🟢已完成 🔴失败\n\n"))
+	s.WriteString(i18n.Tf("filebrowser.current_dir", m.currentDir))
+	s.WriteString(helpStyle.Render(i18n.T("filebrowser.legend")))
 
 	// 文件列表
 	if len(m.files) == 0 {
-		s.WriteString("目录为空或正在加载...")
+		s.WriteString(i18n.T("filebrowser.empty"))
 	} else {
 		// 显示文件列表
 		maxHeight := m.height - 10 // 为三行状态栏和标题留空间
@@ -1942,7 +2101,7 @@ func (m Model) renderMainView() string {
 
 		// 显示滚动指示器
 		if len(m.files) > maxHeight {
-			s.WriteString(fmt.Sprintf("\n[显示 %d-%d / 共 %d 项]", startIndex+1, endIndex, len(m.files)))
+			s.WriteString(i18n.Tf("filebrowser.scroll", startIndex+1, endIndex, len(m.files)))
 		}
 	}
 
@@ -1953,25 +2112,35 @@ func (m Model) renderMainView() string {
 func (m Model) renderSettings() string {
 	var s strings.Builder
 
-	s.WriteString(titleStyle.Render("上传设置"))
+	s.WriteString(titleStyle.Render(i18n.T("settings.title")))
 	s.WriteString("\n\n")
 
 	// 赞助者状态提示
 	if m.userInfo.IsSponsored {
-		s.WriteString("✨ 赞助者专享设置\n\n")
+		s.WriteString(i18n.T("settings.sponsor_only"))
 	} else {
-		s.WriteString("⚠️  部分设置需要赞助者权限\n\n")
+		s.WriteString(i18n.T("settings.require_sponsor"))
 	}
 
-	// 只有赞助者可以访问设置
+	// 所有用户都可以修改语言；赞助者还能修改上传参数
 	var settingsKeys []string
 	var settingsLabels []string
 	var settingsSponsored []bool
 
 	if m.userInfo.IsSponsored {
-		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload"}
-		settingsLabels = []string{"分块大小 (MB):", "并发数:", "上传服务器:", "快速上传:"}
-		settingsSponsored = []bool{true, true, true, true}
+		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload", "language"}
+		settingsLabels = []string{
+			i18n.T("settings.chunk_size"),
+			i18n.T("settings.concurrency"),
+			i18n.T("settings.server"),
+			i18n.T("settings.quick_upload"),
+			i18n.T("settings.language"),
+		}
+		settingsSponsored = []bool{true, true, true, true, false}
+	} else {
+		settingsKeys = []string{"language"}
+		settingsLabels = []string{i18n.T("settings.language")}
+		settingsSponsored = []bool{false}
 	}
 
 	for i, key := range settingsKeys {
@@ -1991,21 +2160,21 @@ func (m Model) renderSettings() string {
 		var line string
 
 		if key == "server" && m.userInfo.IsSponsored {
-			// 显示服务器选择
-			currentServer := "默认"
+			currentServer := i18n.T("settings.default_server")
 			if m.serverIndex < len(m.availableServers) && len(m.availableServers) > 0 {
 				currentServer = m.availableServers[m.serverIndex].Name
 			}
-			line = fmt.Sprintf("%s%s\n%s  %s (←/→ 切换)", prefix, label, strings.Repeat(" ", len(prefix)), currentServer)
+			line = fmt.Sprintf("%s%s\n%s  %s %s", prefix, label, strings.Repeat(" ", len(prefix)), currentServer, i18n.T("settings.switch_lr"))
 		} else if key == "quick_upload" && m.userInfo.IsSponsored {
-			// 显示快速上传开关
-			status := "关闭"
+			status := i18n.T("settings.off")
 			if m.config.QuickUpload {
-				status = "开启"
+				status = i18n.T("settings.on")
 			}
-			line = fmt.Sprintf("%s%s\n%s  %s (Space 切换)", prefix, label, strings.Repeat(" ", len(prefix)), status)
+			line = fmt.Sprintf("%s%s\n%s  %s %s", prefix, label, strings.Repeat(" ", len(prefix)), status, i18n.T("settings.toggle_space"))
+		} else if key == "language" {
+			currentLang := i18n.LanguageNames[i18n.GetLanguage()]
+			line = fmt.Sprintf("%s%s\n%s  %s %s", prefix, label, strings.Repeat(" ", len(prefix)), currentLang, i18n.T("settings.switch_lr"))
 		} else if isLocked {
-			// 被锁定的设置显示为只读值
 			var value string
 			switch key {
 			case "chunk_size":
@@ -2013,9 +2182,8 @@ func (m Model) renderSettings() string {
 			case "concurrency":
 				value = fmt.Sprintf("%d", m.config.MaxConcurrent)
 			}
-			line = fmt.Sprintf("%s%s\n%s  %s (只读)", prefix, label, strings.Repeat(" ", len(prefix)), value)
+			line = fmt.Sprintf("%s%s\n%s  %s %s", prefix, label, strings.Repeat(" ", len(prefix)), value, i18n.T("settings.read_only"))
 		} else {
-			// 普通输入框设置
 			input := m.settingsInputs[key]
 			line = fmt.Sprintf("%s%s\n%s  %s", prefix, label, strings.Repeat(" ", len(prefix)), input.View())
 		}
@@ -2030,8 +2198,6 @@ func (m Model) renderSettings() string {
 		s.WriteString("\n\n")
 	}
 
-	// 操作提示已移至顶部状态栏
-
 	return s.String()
 }
 
@@ -2039,11 +2205,11 @@ func (m Model) renderSettings() string {
 func (m Model) renderUploadList() string {
 	var s strings.Builder
 
-	s.WriteString(titleStyle.Render("上传管理器"))
+	s.WriteString(titleStyle.Render(i18n.T("upload_list.title")))
 	s.WriteString("\n\n")
 
 	if len(m.uploadTasks) == 0 {
-		s.WriteString("暂无上传任务")
+		s.WriteString(i18n.T("upload_list.empty"))
 	} else {
 		s.WriteString(m.uploadTable.View())
 	}
@@ -2055,13 +2221,13 @@ func (m Model) renderUploadList() string {
 func (m Model) renderError() string {
 	var s strings.Builder
 
-	s.WriteString(titleStyle.Render("错误"))
+	s.WriteString(titleStyle.Render(i18n.T("error.title")))
 	s.WriteString("\n\n")
 	if m.err != nil {
 		s.WriteString(errorStyle.Render(m.err.Error()))
 	}
 	s.WriteString("\n\n")
-	s.WriteString(helpStyle.Render("• Enter: 重试 • Esc: 返回"))
+	s.WriteString(helpStyle.Render(i18n.T("error.retry")))
 
 	return s.String()
 }
@@ -2335,6 +2501,11 @@ func loadConfig() Config {
 		config.SelectedServerName = ""
 	}
 
+	// 应用已保存的语言设置
+	if config.Language != "" {
+		i18n.SetLanguage(config.Language)
+	}
+
 	return config
 }
 
@@ -2362,22 +2533,19 @@ func saveConfig(config Config) error {
 func simplifyErrorMessage(err string) string {
 	errLower := strings.ToLower(err)
 
-	// 检查常见的错误类型并返回友好的信息
 	if strings.Contains(errLower, "unauthorized") || strings.Contains(errLower, "invalid") || strings.Contains(errLower, "status") {
-		return "Token无效，请检查后重新输入"
+		return i18n.T("err.invalid_token")
 	}
 	if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "network") {
-		return "网络连接超时，请检查网络后重试"
+		return i18n.T("err.timeout")
 	}
 	if strings.Contains(errLower, "connection") {
-		return "无法连接到服务器，请检查网络连接"
+		return i18n.T("err.connection")
 	}
 	if strings.Contains(errLower, "parse") || strings.Contains(errLower, "json") {
-		return "无法读取到信息，请检查Token是否正确"
+		return i18n.T("err.parse")
 	}
-
-	// 如果是其他错误，返回通用错误信息
-	return "Token验证失败，请重新输入"
+	return i18n.T("err.generic")
 }
 
 // validateAndSaveToken 验证token并保存配置
@@ -2603,13 +2771,16 @@ func loadDirectoryFiles(dirPath string, showHidden bool) ([]FileInfo, error) {
 
 // saveSettings 保存设置
 func (m Model) saveSettings() (tea.Model, tea.Cmd) {
-	// 只有赞助者可以修改设置
+	// 根据用户类型确定可用设置（需与 renderSettings / handleSettings 保持一致）
 	var settingsKeys []string
 	var settingsSponsored []bool
 
 	if m.userInfo.IsSponsored {
-		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload"}
-		settingsSponsored = []bool{true, true, true, true}
+		settingsKeys = []string{"chunk_size", "concurrency", "server", "quick_upload", "language"}
+		settingsSponsored = []bool{true, true, true, true, false}
+	} else {
+		settingsKeys = []string{"language"}
+		settingsSponsored = []bool{false}
 	}
 
 	// 解析和验证输入值
@@ -2621,7 +2792,6 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 
 		// 处理特殊设置项
 		if key == "server" && m.userInfo.IsSponsored {
-			// 保存服务器选择
 			if m.serverIndex < len(m.availableServers) {
 				selectedServer := m.availableServers[m.serverIndex]
 				m.config.SelectedServerName = selectedServer.Name
@@ -2631,7 +2801,10 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 			}
 			continue
 		} else if key == "quick_upload" && m.userInfo.IsSponsored {
-			// 快速上传设置已在按键处理中直接修改config
+			// 已在按键处理中直接修改
+			continue
+		} else if key == "language" {
+			// 语言已在按键处理中通过 applyLanguage 修改，config.Language 已更新
 			continue
 		}
 
