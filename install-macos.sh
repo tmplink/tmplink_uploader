@@ -58,7 +58,7 @@ check_requirements() {
     if [[ ! -w "$INSTALL_DIR" ]] && ! sudo -n true 2>/dev/null; then
         print_info "需要管理员权限来安装到 $INSTALL_DIR"
         echo -n "是否继续？ [y/N]: "
-        read -r response
+        read -r response < /dev/tty
         if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
             print_info "安装已取消"
             exit 0
